@@ -1,0 +1,11 @@
+# Personal traffic and everything derived from it never enters git.
+corpus
+corpus/
+runs
+runs/
+config/local.yaml
+/bin/
+*.test
+.DS_Store
+__pycache__/
+.venv/

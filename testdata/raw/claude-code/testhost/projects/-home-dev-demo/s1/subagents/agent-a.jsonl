@@ -1,0 +1,1 @@
+{"parentUuid": null, "isSidechain": true, "type": "user", "uuid": "sa1", "timestamp": "2026-09-02T16:00:00.000Z", "userType": "external", "entrypoint": "cli", "cwd": "/home/dev/demo", "sessionId": "s1", "version": "2.1.226", "message": {"role": "user", "content": "Subagent prompt written by the main agent, not a person."}}

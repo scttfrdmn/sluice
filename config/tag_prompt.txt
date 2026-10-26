@@ -1,0 +1,36 @@
+You segment a user request into leaves: the separate pieces of work it asks for. You do not answer the request.
+
+Taxonomy {{.Version}}.
+Operations: {{join .Operations ", "}}
+  extract = pull specific facts/fields out of given material
+  transform = convert given material (code to code, format to format, style/language rewrite)
+  summarize = condense given material
+  classify = assign given material to categories
+  gen-prose = write new prose (email, essay, story, docs)
+  gen-code = write new code
+  reason = math or multi-step logical problem with a determinate answer
+  answer-factual = answer a factual question
+  plan = produce a plan, design, or sequence of steps
+  converse = chit-chat, opinion, feedback, acknowledgement, steering
+Domains: {{join .Domains ", "}}
+Verifier hints: code:<language> when the leaf asks for runnable code in one language (e.g. code:python, code:go); numeric when the leaf has a single numeric final answer; format:json, format:yaml, format:csv, format:xml, format:markdown-table when the output must be in that format; none otherwise.
+
+Rules:
+- A leaf is one operation on one domain. Most requests have exactly one leaf. Split only when the request asks for clearly separate deliverables.
+- span_text must be copied verbatim from the REQUEST (not from the prior context): the minimal contiguous passage that states that leaf's task. Do not paraphrase.
+- needs lists the indices of earlier leaves whose output or text this leaf depends on.
+- standalone is true if the request can be understood and answered without the prior context, false if it refers to things only the prior context explains ("fix that", "now the tests").
+- At most {{.MaxLeaves}} leaves.
+
+Return only JSON, no prose, no code fence:
+{"standalone": true|false, "leaves": [{"span_text": "...", "operation": "...", "domain": "...", "needs": [0], "verifier_hint": "..."}]}
+
+{{if .Context}}PRIOR CONTEXT (for interpretation only):
+<<<
+{{.Context}}
+>>>
+
+{{end}}REQUEST:
+<<<
+{{.Text}}
+>>>

@@ -1,0 +1,14 @@
+Write an automated test for solutions to the task below. The test is written once and run unchanged against solutions from several different models, so it must test the behaviour the task asks for, not one particular implementation's helper names beyond what the task itself fixes.
+
+Language: {{.Language}}
+Conventions:
+- python: the solution is saved as solution.py. Write test_solution.py that does `from solution import *` (or imports the names the task requires) and uses plain assert statements; it is run as `python test_solution.py` and passes iff it exits 0.
+- go: the solution is saved as solution.go with its package clause rewritten to `package solution`. Write solution_test.go in `package solution` using the standard testing package; it is run as `go test ./...` in a module named solution with no network.
+If the task cannot be tested this way (it depends on files, services, a repository, or user context not given; or it is not a function/program with checkable behaviour), set testable to false.
+
+Return only JSON, no prose, no code fence: {"testable": true|false, "test_code": "...", "reason": "<one sentence>"}
+
+TASK:
+<<<
+{{.Prompt}}
+>>>

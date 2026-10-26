@@ -1,0 +1,7 @@
+{"id": "w1", "text": "How much is 15% of 240? Show the calculation.", "timestamp": "2024-01-01T00:00:00", "rank": 0, "dataset": "fixture"}
+{"id": "w2", "text": "\u8fd9\u662f\u4e00\u4e2a\u4e2d\u6587\u95ee\u9898\uff0c\u7528\u6765\u6d4b\u8bd5\u8bed\u8a00\u8fc7\u6ee4\u5668\u662f\u5426\u6b63\u786e\u5de5\u4f5c\u3002", "timestamp": "2024-01-01T00:00:01", "rank": 1, "dataset": "fixture"}
+{"id": "w3", "text": "Write a story about a dragon who is afraid of heights.", "timestamp": "2024-01-01T00:00:02", "rank": 2, "dataset": "fixture"}
+{"id": "w4", "text": "hi", "timestamp": "2024-01-01T00:00:03", "rank": 3, "dataset": "fixture"}
+{"id": "w5", "text": "Translate 'good morning, how are you' into French and German.", "timestamp": "2024-01-01T00:00:04", "rank": 4, "dataset": "fixture"}
+{"id": "w6", "text": "What is the boiling point of water at the top of Mount Everest?", "timestamp": "2024-01-01T00:00:05", "rank": 5, "dataset": "fixture"}
+{"id": "w7", "text": "Who wrote the novel Middlemarch, and in what year was it published?", "timestamp": "2024-01-01T00:00:06", "rank": 6, "dataset": "fixture"}

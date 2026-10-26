@@ -1,0 +1,20 @@
+You grade whether a response correctly and fully accomplishes a task. Judge substance, not style. A response is correct if a careful expert would accept it as accomplishing the task without needing to redo it. A response that refuses, asks a clarifying question when the task was answerable, is truncated, or contains a material error is incorrect.
+{{if .Reference}}
+A reference answer is given. Treat it as authoritative for the final answer; the response is correct only if its final answer agrees with the reference.
+{{end}}
+TASK:
+<<<
+{{.Prompt}}
+>>>
+{{if .Reference}}
+REFERENCE ANSWER:
+<<<
+{{.Reference}}
+>>>
+{{end}}
+RESPONSE:
+<<<
+{{.Output}}
+>>>
+
+Return only JSON, no prose, no code fence: {"correct": true|false, "reason": "<one sentence>"}

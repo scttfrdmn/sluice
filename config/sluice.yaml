@@ -1,0 +1,102 @@
+# sluice configuration (PROJECT.md §6, §7). No model IDs or prices in code.
+# Account-specific values (batch S3 URI, IAM role) go in the gitignored
+# config/local.yaml or SLUICE_BATCH_S3_URI / SLUICE_BATCH_ROLE_ARN.
+
+backend: bedrock
+region: us-west-2
+
+hosts:
+  - {name: terror, local: true}
+  - {name: juno.local}
+  - {name: castor.local}
+
+# Pool: Anthropic S/M/L and the Amazon Nova S/M/L tiers listed in Bedrock
+# us-west-2 on the price date. IDs are the us.* cross-region inference
+# profiles (the on-demand path for these models).
+strong: opus-5.5
+models:
+  - {name: haiku-5.5,    id: us.anthropic.claude-haiku-5-5,  provider: anthropic, tier: S, in_per_m: 0.11, out_per_m: 0.55,  concurrency: 16, rpm: 400}
+  - {name: sonnet-5.5,   id: us.anthropic.claude-sonnet-5-5, provider: anthropic, tier: M, in_per_m: 2.20, out_per_m: 11.00, concurrency: 16, rpm: 400}
+  - {name: opus-5.5,     id: us.anthropic.claude-opus-5-5,   provider: anthropic, tier: L, in_per_m: 4.40, out_per_m: 22.00, concurrency: 8,  rpm: 200}
+  - {name: nova-2-lite,  id: us.amazon.nova-2-lite-v1:0,     provider: amazon,    tier: S, in_per_m: 0.33, out_per_m: 2.75,  batch_in_per_m: 0.1595, batch_out_per_m: 1.3255, concurrency: 16, rpm: 400}
+  - {name: nova-pro,     id: us.amazon.nova-pro-v1:0,        provider: amazon,    tier: M, in_per_m: 0.80, out_per_m: 3.20,  batch_in_per_m: 0.40,   batch_out_per_m: 1.60,   concurrency: 16, rpm: 400}
+  - {name: nova-premier, id: us.amazon.nova-premier-v1:0,    provider: amazon,    tier: L, in_per_m: 2.50, out_per_m: 12.50, batch_in_per_m: 1.25,   batch_out_per_m: 6.25,   concurrency: 8,  rpm: 200}
+
+# Open-weight lane: out for the first E0 run (PROJECT.md §6).
+local_models: []
+
+prices:
+  date: "2026-10-26"
+  region: us-west-2
+  source: "AWS Price List API: AmazonBedrock (Nova) and AmazonBedrockFoundationModels (Claude, *_standard units)"
+  note: "Claude 5.5 has no batch price in the price list on this date; Claude batch cells, if any, are priced at on-demand rates and flagged price_basis=on-demand-fallback."
+
+judges:
+  providers: [anthropic, amazon]
+  tier_preference: [M, S, L]
+  max_tokens: 400
+
+taxonomy:
+  version: v0
+  operations: [extract, transform, summarize, classify, gen-prose, gen-code, reason, answer-factual, plan, converse]
+  domains: [general, code, sci-tech, legal-finance, medical, creative]
+  # code:<lang> -> executable/compile rung; numeric -> exact-answer rung;
+  # format:<fmt> -> parse rung; none -> judges only.
+  verifier_hints: ["code:*", numeric, "format:json", "format:yaml", "format:csv", "format:xml", "format:markdown-table", none]
+  max_leaves: 8
+  tag_max_tokens: 4000
+  context_tokens: 2000
+  chars_per_token: 4.0
+
+matrix:
+  draws: 2
+  max_tokens: 4096
+  batch_threshold: 1000
+  batch_min_records: 100
+  batch_max_records: 50000
+  on_demand_subsample: 0.05
+  flush_rows: 200
+  flush_seconds: 30
+  max_attempts: 6
+
+label:
+  sandbox: docker
+  timeout_seconds: 30
+  concurrency: 4
+  workers: 32
+  ref_max_tokens: 4096
+  images:
+    python: python:3.13-slim
+    go: golang:1.26-alpine
+    javascript: node:22-alpine
+    bash: bash:5
+
+harvest:
+  min_chars: 20
+  dedup_jaccard: 0.85
+  drop_sample_size: 50
+  owner: scttfrdmn
+  exclude_repos: [sluice]
+  wildchat_oversample: 1.6
+  wildchat_dataset: allenai/WildChat-1M
+  wildchat_fallback: lmsys/lmsys-chat-1m
+
+report:
+  delta: 0.05
+  thresholds: [0.05, 0.10]
+  bootstrap: 2000
+  rho_proceed: 0.50
+
+seeds:
+  split: 20261026
+  subsample: 5
+  wildchat: 3000
+  bootstrap: 17
+  minhash: 85
+
+prompts:
+  tag: tag_prompt.txt
+  reclass: reclass_prompt.txt
+  judge: judge_prompt.txt
+  test: test_prompt.txt
+  numeric: numeric_prompt.txt

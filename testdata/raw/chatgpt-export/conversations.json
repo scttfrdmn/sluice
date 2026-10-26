@@ -1,0 +1,213 @@
+[
+ {
+  "title": "kyoto",
+  "create_time": 1757000000.0,
+  "mapping": {
+   "root": {
+    "id": "root",
+    "parent": null,
+    "children": [
+     "sys"
+    ],
+    "message": null
+   },
+   "sys": {
+    "id": "sys",
+    "parent": "root",
+    "children": [
+     "hid"
+    ],
+    "message": {
+     "id": "sys",
+     "author": {
+      "role": "system",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1757000000.0,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       ""
+      ]
+     },
+     "status": "finished_successfully",
+     "metadata": {}
+    }
+   },
+   "hid": {
+    "id": "hid",
+    "parent": "sys",
+    "children": [
+     "u1"
+    ],
+    "message": {
+     "id": "hid",
+     "author": {
+      "role": "user",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1757000000.0,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "My custom instructions are hidden from the conversation view."
+      ]
+     },
+     "status": "finished_successfully",
+     "metadata": {
+      "is_visually_hidden_from_conversation": true
+     }
+    }
+   },
+   "u1": {
+    "id": "u1",
+    "parent": "hid",
+    "children": [
+     "a1"
+    ],
+    "message": {
+     "id": "u1",
+     "author": {
+      "role": "user",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1757000100.0,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "Plan a three-day trip to Kyoto for someone who likes temples and food."
+      ]
+     },
+     "status": "finished_successfully",
+     "metadata": {}
+    }
+   },
+   "a1": {
+    "id": "a1",
+    "parent": "u1",
+    "children": [
+     "u2old",
+     "u2"
+    ],
+    "message": {
+     "id": "a1",
+     "author": {
+      "role": "assistant",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1757000110.0,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "Day 1: Higashiyama..."
+      ]
+     },
+     "status": "finished_successfully",
+     "metadata": {}
+    }
+   },
+   "u2old": {
+    "id": "u2old",
+    "parent": "a1",
+    "children": [],
+    "message": {
+     "id": "u2old",
+     "author": {
+      "role": "user",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1757000150.0,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "This edited-away branch must never appear in the corpus."
+      ]
+     },
+     "status": "finished_successfully",
+     "metadata": {}
+    }
+   },
+   "u2": {
+    "id": "u2",
+    "parent": "a1",
+    "children": [
+     "a2"
+    ],
+    "message": {
+     "id": "u2",
+     "author": {
+      "role": "user",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1757000200.0,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "Extract all the dates mentioned: The meeting moved from March 3 to March 10, and the review is on April 2."
+      ]
+     },
+     "status": "finished_successfully",
+     "metadata": {}
+    }
+   },
+   "a2": {
+    "id": "a2",
+    "parent": "u2",
+    "children": [
+     "u3"
+    ],
+    "message": {
+     "id": "a2",
+     "author": {
+      "role": "assistant",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1757000210.0,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "March 3, March 10, April 2"
+      ]
+     },
+     "status": "finished_successfully",
+     "metadata": {}
+    }
+   },
+   "u3": {
+    "id": "u3",
+    "parent": "a2",
+    "children": [],
+    "message": {
+     "id": "u3",
+     "author": {
+      "role": "user",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1757000300.0,
+     "content": {
+      "content_type": "multimodal_text",
+      "parts": [
+       {
+        "content_type": "image_asset_pointer",
+        "asset_pointer": "file-service://x"
+       }
+      ]
+     },
+     "status": "finished_successfully",
+     "metadata": {}
+    }
+   }
+  },
+  "current_node": "u3",
+  "conversation_id": "g1",
+  "id": "g1"
+ }
+]

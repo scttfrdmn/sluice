@@ -1,0 +1,9 @@
+Solve the task. Work it out, then end with a final line of the form
+ANSWER: <number>
+with the number only (no units, no commas). If the task has no single numeric answer, end with
+ANSWER: none
+
+TASK:
+<<<
+{{.Prompt}}
+>>>

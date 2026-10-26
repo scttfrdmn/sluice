@@ -1,0 +1,138 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Scott Friedman
+
+package report
+
+import (
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+
+	"github.com/scttfrdmn/sluice/internal/certify"
+)
+
+func iv(i certify.Interval) string { return fmt.Sprintf("[%.3f, %.3f]", i.Lo, i.Hi) }
+
+// Markdown writes report.md.
+func (r *Report) Markdown(w io.Writer) {
+	p := func(format string, a ...any) { fmt.Fprintf(w, format, a...) }
+	p("# sluice E0 report\n\n")
+	p("Split: **%s**. Taxonomy **%s** (iteration %d). δ = %.2f. Correctness = correct on both draws.\n\n", r.RunSplit, r.TaxonomyVersion, r.Iteration, r.Delta)
+
+	p("## Decision\n\n%s\n\n%s\n\n", r.DecisionRule, r.Decision)
+
+	p("## Pool and prices\n\nPrices dated %s (%s), source: %s.\n", r.Prices.Date, r.Prices.Region, r.Prices.Source)
+	if r.Prices.Note != "" {
+		p("%s\n", r.Prices.Note)
+	}
+	p("\n| model | id | provider | tier | $/M in | $/M out |\n|---|---|---|---|---:|---:|\n")
+	for _, m := range r.Models {
+		p("| %s | `%s` | %s | %s | %.4g | %.4g |\n", m.Name, m.ID, m.Provider, m.Tier, m.InPerM, m.OutPerM)
+	}
+
+	p("\n## 1. Corpus\n\n| source | requests | tagged | tag_failed | leaves | mean leaves/request | compound (≥2 leaves) | standalone |\n|---|---:|---:|---:|---:|---:|---:|---:|\n")
+	for _, c := range r.Corpus {
+		p("| %s | %d | %d | %d | %d | %.2f | %.1f%% | %.1f%% |\n", c.Source, c.Requests, c.Tagged, c.TagFailed, c.Leaves, c.MeanLeaves, 100*c.FracCompound, 100*c.FracStandalone)
+	}
+	p("\nClass histogram (all leaves):\n\n| class | leaves |\n|---|---:|\n")
+	type kv struct {
+		k string
+		v int
+	}
+	var hist []kv
+	for k, v := range r.ClassHistogram {
+		hist = append(hist, kv{k, v})
+	}
+	sort.Slice(hist, func(i, j int) bool { return hist[i].v > hist[j].v || (hist[i].v == hist[j].v && hist[i].k < hist[j].k) })
+	for _, h := range hist {
+		p("| %s | %d |\n", h.k, h.v)
+	}
+	c := r.Coverage
+	p("\nCoverage (split %s): %d leaves, %d with all cells labeled; %d missing cells, %d unlabeled cells.\n", r.RunSplit, c.LeavesInSplit, c.LeavesComplete, c.MissingCells, c.UnlabeledCells)
+	p("Label methods: %s. Rungs: %s.\n", fmtCounts(c.MethodCounts), fmtIntCounts(c.RungCounts))
+
+	p("\n## 2. Noise\n\n| class | (leaf, model) pairs | draw flip rate | judged cells | judge disagreement |\n|---|---:|---:|---:|---:|\n")
+	for _, n := range r.Noise {
+		p("| %s | %d | %.3f | %d | %.3f |\n", n.Class, n.Pairs, n.FlipRate, n.JudgedCells, n.JudgeDisagree)
+	}
+
+	p("\n## 3. Per class\n\nAccuracy with Clopper–Pearson 95%% CI; certified error = one-sided %.0f%% upper bound.\n\n", 100*(1-r.Delta))
+	names := make([]string, len(r.Models))
+	for i, m := range r.Models {
+		names[i] = m.Name
+	}
+	for _, cl := range r.Classes {
+		rho := "undefined"
+		if v := r.ClassRho[cl.Class]; v != nil {
+			rho = fmt.Sprintf("%.3f", *v)
+		}
+		p("### %s (n=%d)\n\nbest: %s %.3f; oracle %.3f; within-class residual %.3f; ρ_c %s; rungs %s; cheapest clearing 5%%: %s; 10%%: %s.\n\n",
+			cl.Class, cl.N, cl.Best, cl.BestAcc, cl.Oracle, cl.Residual, rho, cl.Rung, orNone(cl.Cheapest["0.05"]), orNone(cl.Cheapest["0.10"]))
+		p("| model | accuracy | 95%% CI | certified error ≤ | mean $/call |\n|---|---:|---|---:|---:|\n")
+		for _, n := range names {
+			m := cl.PerModel[n]
+			p("| %s | %.3f | %s | %.3f | %.5f |\n", n, m.Accuracy, iv(m.CI), m.ErrUpper, m.MeanCost)
+		}
+		p("\n")
+	}
+
+	p("## 4. Headline\n\nSelection-valid intervals: each of K models at δ/(2K), oracle at δ/2, best-per-class Bonferroni over classes × models. ρ interval: paired bootstrap over requests.\n\n")
+	p("| group | leaves | requests | best single | best-per-class | oracle | oracle − best gap | ρ | ρ 95%% |\n|---|---:|---:|---|---|---|---|---:|---|\n")
+	for _, g := range r.GroupOrder {
+		h := r.Groups[g]
+		rho, rhoCI := "undefined", "-"
+		if h.Rho != nil {
+			rho = fmt.Sprintf("%.3f", *h.Rho)
+		}
+		if h.RhoCI != nil {
+			rhoCI = iv(*h.RhoCI)
+		}
+		p("| %s | %d | %d | %.3f %s (%s) | %.3f %s | %.3f %s | %s | %s | %s |\n", g, h.N, h.NRequests,
+			h.BestSingleAcc, iv(h.BestSingleCI), h.BestSingle, h.BestPerClass, iv(h.BestPerClassCI), h.Oracle, iv(h.OracleCI), iv(h.GapCI), rho, rhoCI)
+	}
+
+	p("\n## 5. Cost and latency (measured)\n\nLatency is on-demand calls only, including service-side queueing; batch cells carry batch wall time separately and are excluded.\n\n")
+	p("| model | cells | total $ | mean $/call | mean tok in | mean tok out | on-demand n | p50 ms | p90 ms | mean ms | batch cells | batch priced on-demand |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	for _, m := range r.CostLatency {
+		p("| %s | %d | %.2f | %.5f | %.0f | %.0f | %d | %.0f | %.0f | %.0f | %d | %d |\n", m.Model, m.Cells, m.TotalUSD, m.MeanUSDPerCall, m.MeanTokensIn, m.MeanTokensOut, m.OnDemandN, m.LatP50, m.LatP90, m.LatMean, m.BatchCells, m.FallbackPriced)
+	}
+	pol := r.Policy
+	p("\nBest-per-class policy (pooled assignment) vs always-%s over %d leaves, one call per leaf: $%.4f vs $%.4f (ratio %.3f). Excludes tagger ($%.2f total) and labeling ($%.2f total).\n",
+		pol.StrongModel, pol.Leaves, pol.BestPerClassUSD, pol.AlwaysStrongUSD, pol.Ratio, r.TaggerCostUSD, r.LabelCostUSD)
+	p("\nPlots: `accuracy_cost.png`, `class_rho.png`.\n")
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
+}
+
+func fmtCounts(m map[string]int) string {
+	var parts []string
+	for _, k := range sortedKeys(m) {
+		parts = append(parts, fmt.Sprintf("%s %d", k, m[k]))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func fmtIntCounts(m map[int]int) string {
+	var ks []int
+	for k := range m {
+		ks = append(ks, k)
+	}
+	sort.Ints(ks)
+	var parts []string
+	for _, k := range ks {
+		parts = append(parts, fmt.Sprintf("rung %d: %d", k, m[k]))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ", ")
+}

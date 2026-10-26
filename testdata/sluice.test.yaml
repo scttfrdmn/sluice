@@ -1,0 +1,98 @@
+# Test configuration for `make e0`: fake backend, fake sandbox, synthetic
+# model names and prices. Nothing produced with this file is a measurement.
+
+backend: fake
+region: us-west-2
+
+hosts:
+  - {name: testhost, local: true}
+
+# Pool: Anthropic S/M/L and the Amazon Nova S/M/L tiers listed in Bedrock
+# us-west-2 on the price date. IDs are the us.* cross-region inference
+# profiles (the on-demand path for these models).
+strong: fake-anthropic-l
+models:
+  - {name: fake-anthropic-s, id: fake.anthropic.s, provider: anthropic, tier: S, in_per_m: 0.1, out_per_m: 0.5, concurrency: 4}
+  - {name: fake-anthropic-m, id: fake.anthropic.m, provider: anthropic, tier: M, in_per_m: 2.0, out_per_m: 10.0, concurrency: 4}
+  - {name: fake-anthropic-l, id: fake.anthropic.l, provider: anthropic, tier: L, in_per_m: 4.0, out_per_m: 20.0, concurrency: 4}
+  - {name: fake-amazon-s, id: fake.amazon.s, provider: amazon, tier: S, in_per_m: 0.3, out_per_m: 2.5, batch_in_per_m: 0.15, batch_out_per_m: 1.25, concurrency: 4}
+  - {name: fake-amazon-m, id: fake.amazon.m, provider: amazon, tier: M, in_per_m: 0.8, out_per_m: 3.2, batch_in_per_m: 0.4, batch_out_per_m: 1.6, concurrency: 4}
+  - {name: fake-amazon-l, id: fake.amazon.l, provider: amazon, tier: L, in_per_m: 2.5, out_per_m: 12.5, batch_in_per_m: 1.25, batch_out_per_m: 6.25, concurrency: 4}
+
+# Open-weight lane: out for the first E0 run (PROJECT.md §6).
+local_models: []
+
+prices:
+  date: "2026-10-26"
+  region: none
+  source: "synthetic test prices"
+
+judges:
+  providers: [anthropic, amazon]
+  tier_preference: [M, S, L]
+  max_tokens: 400
+
+taxonomy:
+  version: v0
+  operations: [extract, transform, summarize, classify, gen-prose, gen-code, reason, answer-factual, plan, converse]
+  domains: [general, code, sci-tech, legal-finance, medical, creative]
+  # code:<lang> -> executable/compile rung; numeric -> exact-answer rung;
+  # format:<fmt> -> parse rung; none -> judges only.
+  verifier_hints: ["code:*", numeric, "format:json", "format:yaml", "format:csv", "format:xml", "format:markdown-table", none]
+  max_leaves: 8
+  tag_max_tokens: 4000
+  context_tokens: 2000
+  chars_per_token: 4.0
+
+matrix:
+  draws: 2
+  max_tokens: 4096
+  batch_threshold: 100
+  batch_min_records: 10
+  batch_max_records: 50000
+  on_demand_subsample: 0.05
+  flush_rows: 50
+  flush_seconds: 2
+  max_attempts: 6
+
+label:
+  sandbox: fake
+  timeout_seconds: 30
+  concurrency: 4
+  workers: 32
+  ref_max_tokens: 4096
+  images:
+    python: python:3.13-slim
+    go: golang:1.26-alpine
+    javascript: node:22-alpine
+    bash: bash:5
+
+harvest:
+  min_chars: 20
+  dedup_jaccard: 0.85
+  drop_sample_size: 50
+  owner: scttfrdmn
+  exclude_repos: [sluice]
+  wildchat_oversample: 1.6
+  wildchat_dataset: allenai/WildChat-1M
+  wildchat_fallback: lmsys/lmsys-chat-1m
+
+report:
+  delta: 0.05
+  thresholds: [0.05, 0.10]
+  bootstrap: 300
+  rho_proceed: 0.50
+
+seeds:
+  split: 20261026
+  subsample: 5
+  wildchat: 3000
+  bootstrap: 17
+  minhash: 85
+
+prompts:
+  tag: ../config/tag_prompt.txt
+  reclass: ../config/reclass_prompt.txt
+  judge: ../config/judge_prompt.txt
+  test: ../config/test_prompt.txt
+  numeric: ../config/numeric_prompt.txt

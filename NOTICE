@@ -1,0 +1,7 @@
+sluice
+Copyright 2026 Scott Friedman
+
+This product includes software developed by Scott Friedman.
+
+internal/certify contains code copied from github.com/scttfrdmn/go-cascade
+(Apache License 2.0, Copyright 2026 Scott Friedman).

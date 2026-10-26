@@ -1,0 +1,11 @@
+Assign one operation and one domain to this piece of a user request, from taxonomy {{.Version}}.
+Operations: {{join .Operations ", "}}
+Domains: {{join .Domains ", "}}
+Verifier hints: code:<language>, numeric, format:json, format:yaml, format:csv, format:xml, format:markdown-table, none.
+
+Return only JSON: {"operation": "...", "domain": "...", "verifier_hint": "..."}
+
+PIECE:
+<<<
+{{.Text}}
+>>>
