@@ -1,9 +1,8 @@
 # Personal traffic and everything derived from it never enters git.
-corpus
-corpus/
-runs
-runs/
-config/local.yaml
+# Anchored: /corpus and /runs at the repo root only (internal/corpus is code).
+/corpus
+/runs
+/config/local.yaml
 /bin/
 *.test
 .DS_Store
