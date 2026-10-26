@@ -3,13 +3,13 @@ module github.com/scttfrdmn/sluice
 go 1.26.0
 
 require (
-	github.com/abadojack/whatlanggo v1.0.1
 	github.com/aws/aws-sdk-go-v2 v1.47.4
 	github.com/aws/aws-sdk-go-v2/config v1.33.11
 	github.com/aws/aws-sdk-go-v2/service/bedrock v1.74.1
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.63.7
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.5
 	github.com/parquet-go/parquet-go v0.32.0
+	github.com/pemistahl/lingua-go v1.4.0
 	golang.org/x/sync v0.24.0
 	golang.org/x/time v0.16.0
 	gonum.org/v1/plot v0.17.0
@@ -44,7 +44,9 @@ require (
 	github.com/parquet-go/bitpack v1.0.0 // indirect
 	github.com/parquet-go/jsonlite v1.0.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
+	github.com/shopspring/decimal v1.3.1 // indirect
 	github.com/twpayne/go-geom v1.6.1 // indirect
+	golang.org/x/exp v0.0.0-20221106115401-f9659909a136 // indirect
 	golang.org/x/image v0.30.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.28.0 // indirect

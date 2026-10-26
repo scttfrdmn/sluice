@@ -6,9 +6,10 @@ package harvest
 import (
 	"regexp"
 	"strings"
+	"sync"
 	"unicode"
 
-	"github.com/abadojack/whatlanggo"
+	"github.com/pemistahl/lingua-go"
 )
 
 // Credential and account-identifier patterns (PROJECT.md §5). A match is a
@@ -31,7 +32,7 @@ var secretPatterns = []secretPattern{
 	{Name: "anthropic-openai-key", Re: regexp.MustCompile(`\bsk-(?:ant-[A-Za-z0-9_-]{20,}|proj-[A-Za-z0-9_-]{20,}|[A-Za-z0-9]{40,})`)},
 	{Name: "slack-token", Re: regexp.MustCompile(`\bxox[abposr]-[A-Za-z0-9-]{10,}`)},
 	{Name: "google-api-key", Re: regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}\b`)},
-	{Name: "s3-bucket-uri", Re: regexp.MustCompile(`(?i)\bs3://[a-z0-9][a-z0-9.-]{2,62}|arn:aws[a-z-]*:s3:::[a-z0-9][a-z0-9.-]{2,62}`)},
+	{Name: "s3-bucket-uri", Re: regexp.MustCompile(`(?i)(?:\bs3://|arn:aws[a-z-]*:s3:::)([a-z0-9][a-z0-9.-]{2,62})`), Check: notPlaceholderBucket},
 }
 
 // AWS context tokens near which a 12-digit number is taken as an account ID.
@@ -41,6 +42,15 @@ var (
 )
 
 const accountWindow = 40
+
+// Placeholders that identify nothing: generic bucket names used in docs and
+// examples, and AWS's documented example account IDs.
+var (
+	placeholderBuckets  = map[string]bool{"bucket": true, "my-bucket": true, "mybucket": true, "your-bucket": true, "example-bucket": true, "bucket-name": true, "my-bucket-name": true, "some-bucket": true, "foo": true, "bar": true}
+	placeholderAccounts = map[string]bool{"123456789012": true, "111122223333": true, "000000000000": true}
+)
+
+func notPlaceholderBucket(name string) bool { return !placeholderBuckets[strings.ToLower(name)] }
 
 func secretKeyShape(s string) bool {
 	var up, low, dig, hexOnly = false, false, false, true
@@ -77,6 +87,9 @@ func secretMatch(text string) (string, int) {
 	}
 	for _, loc := range reTwelve.FindAllStringSubmatchIndex(text, -1) {
 		s, e := loc[2], loc[3]
+		if placeholderAccounts[text[s:e]] {
+			continue
+		}
 		lo, hi := max(0, s-accountWindow), min(len(text), e+accountWindow)
 		if reAWSContext.MatchString(text[lo:s]) || reAWSContext.MatchString(text[e:hi]) {
 			return "aws-account-id-in-context", s
@@ -85,67 +98,68 @@ func secretMatch(text string) (string, int) {
 	return "", -1
 }
 
-// English detection. whatlanggo is run on the text with code blocks, URLs
-// and paths removed; text that is mostly code has too little prose to
-// detect and is judged by its share of common English function words.
+// English detection (PROJECT.md §5 "non-English"). lingua-go is used
+// because it is accurate on short text, which most human turns are. Code
+// blocks, URLs, paths and inline code are removed first; text with fewer
+// than three prose words (and under 12 letters) left has nothing to judge and is kept as
+// "no-prose" (counted separately in lang_detail).
 
 var (
-	reFence = regexp.MustCompile("(?s)```.*?```")
-	reURL   = regexp.MustCompile(`https?://\S+`)
-	rePath  = regexp.MustCompile(`(?:~|\.{0,2})?/[\w.\-/]+`)
-	reWord  = regexp.MustCompile(`[A-Za-z']+`)
+	reFence  = regexp.MustCompile("(?s)```.*?```")
+	reInline = regexp.MustCompile("`[^`\n]*`")
+	reURL    = regexp.MustCompile(`https?://\S+`)
+	rePath   = regexp.MustCompile(`(?:~|\.{0,2})?/[\w.\-/]+`)
+	reWord   = regexp.MustCompile(`\pL{2,}`)
 )
 
-var stopwords = func() map[string]bool {
-	m := map[string]bool{}
-	for _, w := range strings.Fields("the a an and or but if of to in on at for with from by as is are was were be been it this that these those i you we they he she my your our can could should would will do does did not no yes so what how why when where which who please make use add fix run all any some more just also then than there here into out up about") {
-		m[w] = true
-	}
-	return m
-}()
+var langDetector = sync.OnceValue(func() lingua.LanguageDetector {
+	return lingua.NewLanguageDetectorBuilder().
+		FromLanguages(lingua.English, lingua.Spanish, lingua.French, lingua.German, lingua.Portuguese, lingua.Italian,
+			lingua.Dutch, lingua.Russian, lingua.Ukrainian, lingua.Polish, lingua.Turkish, lingua.Chinese, lingua.Japanese,
+			lingua.Korean, lingua.Arabic, lingua.Persian, lingua.Hindi, lingua.Vietnamese, lingua.Indonesian, lingua.Swedish,
+			lingua.Danish, lingua.Bokmal, lingua.Czech, lingua.Greek, lingua.Hebrew, lingua.Thai, lingua.Romanian, lingua.Hungarian).
+		WithPreloadedLanguageModels().
+		Build()
+})
+
+// englishFloor is the English confidence below which non-English-labelled
+// text is dropped. Chosen on the r1 drop sample: misclassified English
+// scored 0.11–0.28, real non-English ≤ 0.007.
+const englishFloor = 0.05
 
 // LangResult is the outcome of language detection.
 type LangResult struct {
 	English bool
-	Lang    string // ISO 639-3 from whatlanggo, or "stopword" for the fallback
+	Lang    string // ISO 639-3, or "no-prose"
 }
 
 func detectEnglish(text string) LangResult {
 	prose := reFence.ReplaceAllString(text, " ")
+	prose = reInline.ReplaceAllString(prose, " ")
 	prose = reURL.ReplaceAllString(prose, " ")
 	prose = rePath.ReplaceAllString(prose, " ")
-	// Non-Latin script dominates: not English regardless of word counts.
-	var letters, latin int
+	letters := 0
 	for _, r := range prose {
 		if unicode.IsLetter(r) {
 			letters++
-			if unicode.Is(unicode.Latin, r) {
-				latin++
-			}
 		}
 	}
-	if letters > 0 && float64(latin)/float64(letters) < 0.5 {
-		info := whatlanggo.Detect(prose)
-		return LangResult{English: false, Lang: info.Lang.Iso6393()}
+	if len(reWord.FindAllString(prose, -1)) < 3 && letters < 12 {
+		return LangResult{English: true, Lang: "no-prose"}
 	}
-	words := reWord.FindAllString(strings.ToLower(prose), -1)
-	stop := 0
-	for _, w := range words {
-		if stopwords[w] {
-			stop++
-		}
+	lang, ok := langDetector().DetectLanguageOf(prose)
+	if !ok {
+		return LangResult{English: true, Lang: "undetermined"}
 	}
-	info := whatlanggo.Detect(prose)
-	if info.Lang == whatlanggo.Eng && info.IsReliable() {
+	if lang == lingua.English {
 		return LangResult{English: true, Lang: "eng"}
 	}
-	// Short or code-heavy text: whatlanggo is unreliable below a few dozen
-	// letters, so fall back to function-word share.
-	if len(words) >= 3 && float64(stop)/float64(len(words)) >= 0.2 {
-		return LangResult{English: true, Lang: "stopword"}
+	// The top label is unstable on short English text (terse commands come
+	// out as Dutch or Italian); real non-English text gives English a
+	// confidence near zero. Drop only when English is implausible.
+	iso := strings.ToLower(lang.IsoCode639_3().String())
+	if langDetector().ComputeLanguageConfidence(prose, lingua.English) >= englishFloor {
+		return LangResult{English: true, Lang: "eng-low-" + iso}
 	}
-	if info.Lang == whatlanggo.Eng {
-		return LangResult{English: true, Lang: "eng-unreliable"}
-	}
-	return LangResult{English: false, Lang: info.Lang.Iso6393()}
+	return LangResult{English: false, Lang: iso}
 }

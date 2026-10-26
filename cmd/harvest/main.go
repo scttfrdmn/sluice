@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/scttfrdmn/sluice/internal/config"
 	"github.com/scttfrdmn/sluice/internal/harvest"
@@ -63,6 +64,7 @@ func run() error {
 		wildchatN    = flag.Int("wildchat", 0, "public-control sample size N (0 disables)")
 		wildchatFile = flag.String("wildchat-file", "corpus/raw/wildchat/sample.jsonl", "public-control sample JSONL")
 		review       = flag.String("review", "corpus/review", "directory for drop samples (gitignored)")
+		corpusMD     = flag.String("corpus-md", "", "also write the aggregate table as markdown to this path (e.g. docs/CORPUS.md)")
 	)
 	flag.Parse()
 	if *runID == "" {
@@ -114,6 +116,16 @@ func run() error {
 		return err
 	}
 	st.PrintTable(os.Stdout)
+	if *corpusMD != "" {
+		f, err := os.Create(*corpusMD)
+		if err != nil {
+			return err
+		}
+		st.Markdown(f, fmt.Sprintf("Harvest run `%s`, %s.", *runID, time.Now().UTC().Format("2006-01-02")))
+		if err := f.Close(); err != nil {
+			return err
+		}
+	}
 	fmt.Printf("wrote %d records to %s\n", len(recs), dir.Records())
 	return nil
 }

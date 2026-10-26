@@ -30,6 +30,8 @@ func TestSecretPatterns(t *testing.T) {
 		{"bare 12 digits", "order number " + strings.Repeat("7", 12) + " shipped", ""},
 		{"12 digits far from context", "aws" + strings.Repeat(" filler", 10) + " " + strings.Repeat("3", 12), ""},
 		{"bucket uri", "copy to s3://" + "my-data-bucket/x", "s3-bucket-uri"},
+		{"placeholder bucket", "copy to s3://" + "bucket/prefix/", ""},
+		{"example account", "arn:aws:iam::" + "1234" + "56789012" + ":role/x", ""},
 		{"github token", "token " + fakeKey("ghp_", 36), "github-token"},
 		{"plain prose", "Please refactor the parser and add tests.", ""},
 	}
@@ -46,11 +48,21 @@ func TestDetectEnglish(t *testing.T) {
 		"Write a Python function that returns the n-th Fibonacci number.",
 		"fix the bug in ./internal/foo/bar.go where it panics on nil",
 		"now add tests for this:\n```go\nfunc f(x int) int { return x * 2 }\n```",
+		"something different happened",
+		"update GitHub issue #95",
+		"Describe Earth became graveyard planet",
+		"need to align normally these previously recieved images from api backend",
+		"merge #546, #547, #552",
+		"open the project site in the browser",
+		"merge #149 and cut lagotto v0.58.1.",
+		"invert it (or just use IP)",
 	}
 	no := []string{
 		"¿Cuál es la capital de Australia y por qué no es Sídney la capital del país?",
 		"这是一个中文问题，用来测试语言过滤器是否正确工作。",
 		"Wie kann ich in Python eine Liste nach dem zweiten Element sortieren und dabei Duplikate entfernen?",
+		"Les éléments suivants sont les éléments de contrôle de la transcription",
+		"Напиши код, который использует случайную величину 0 или 1.",
 	}
 	for _, s := range yes {
 		if r := detectEnglish(s); !r.English {

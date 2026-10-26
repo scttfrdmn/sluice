@@ -47,10 +47,15 @@ type Key struct {
 // reason for turns skipped as non-requests and records dropped by filters.
 type Row struct {
 	Key
-	Candidates int            `json:"candidates"`
-	Kept       int            `json:"kept"`
-	Skipped    map[string]int `json:"skipped,omitempty"`
-	Dropped    map[string]int `json:"dropped,omitempty"`
+	Candidates int `json:"candidates"`
+	Kept       int `json:"kept"`
+	// Of the kept records: with non-empty context_text, with attachments,
+	// and (repos only) issue bodies as opposed to prompt files.
+	WithContext int            `json:"with_context"`
+	WithAttach  int            `json:"with_attachment"`
+	IssueBodies int            `json:"issue_bodies"`
+	Skipped     map[string]int `json:"skipped,omitempty"`
+	Dropped     map[string]int `json:"dropped,omitempty"`
 }
 
 // Stats is the aggregate harvest table. It contains counts only and is
@@ -151,9 +156,17 @@ func Run(ctx context.Context, cfg *config.Config, o Options) ([]corpus.Record, *
 	var pass []corpus.Record
 	for _, r := range cands {
 		row := st.row(r.Source, r.Host)
-		if name, off := secretMatch(r.Text + "\n" + r.ContextText); name != "" {
+		name, off := secretMatch(r.Text)
+		where := "request"
+		if name == "" && r.ContextText != "" {
+			// context_text is sent to models too, so a match there drops the record.
+			if name, _ = secretMatch(r.ContextText); name != "" {
+				where, off = "context-only", 0
+			}
+		}
+		if name != "" {
 			row.Dropped["credential"]++
-			st.PatternHits[name]++
+			st.PatternHits[name+" ("+where+")"]++
 			credDrops = append(credDrops, Drop{Reason: name, Source: r.Source, OriginRef: r.OriginRef, Offset: off, Text: clip(r.Text, 2000)})
 			continue
 		}
@@ -223,7 +236,17 @@ func Run(ctx context.Context, cfg *config.Config, o Options) ([]corpus.Record, *
 
 	for i := range kept {
 		kept[i].Split = split(cfg.Seeds.Split, kept[i].ID)
-		st.row(kept[i].Source, kept[i].Host).Kept++
+		row := st.row(kept[i].Source, kept[i].Host)
+		row.Kept++
+		if kept[i].ContextText != "" {
+			row.WithContext++
+		}
+		if kept[i].HasAttachment {
+			row.WithAttach++
+		}
+		if strings.HasPrefix(kept[i].OriginRef, "repos:issue:") {
+			row.IssueBodies++
+		}
 		st.Splits[kept[i].Split]++
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].ID < kept[j].ID })
@@ -340,4 +363,54 @@ func writeJSON(path string, v any) error {
 		return err
 	}
 	return jsonl.Write(path, []any{v})
+}
+
+// Markdown writes the publishable corpus table (docs/CORPUS.md). Counts
+// only; no text.
+func (s *Stats) Markdown(w io.Writer, title string) {
+	fmt.Fprintf(w, "# Corpus\n\n%s\n\n", title)
+	fmt.Fprintln(w, "Aggregate counts only. Raw inputs and harvested records stay on the local machine (`corpus/`, `runs/`, both gitignored).")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "## Source × host")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "| source | host | candidates | kept | with context | with attachment | issue bodies | credential | short | non-English | near-dup |")
+	fmt.Fprintln(w, "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+	var tc, tk int
+	for _, r := range s.Rows {
+		fmt.Fprintf(w, "| %s | %s | %d | %d | %d | %d | %d | %d | %d | %d | %d |\n", r.Source, dash(r.Host), r.Candidates, r.Kept, r.WithContext, r.WithAttach, r.IssueBodies,
+			r.Dropped["credential"], r.Dropped["short"], r.Dropped["non-english"], r.Dropped["near-duplicate"])
+		tc += r.Candidates
+		tk += r.Kept
+	}
+	fmt.Fprintf(w, "| **total** | | %d | %d | | | | | | | |\n\n", tc, tk)
+	fmt.Fprintf(w, "Split: calibration %d, test %d.\n\n", s.Splits["calibration"], s.Splits["test"])
+	fmt.Fprintln(w, "## Credential drops by pattern")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Hard drop of the whole record. \"context-only\" means the match was in `context_text` (the preceding turns), which is also sent to models.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "| pattern | records |\n|---|---:|")
+	for _, k := range sortedKeys(s.PatternHits) {
+		fmt.Fprintf(w, "| %s | %d |\n", k, s.PatternHits[k])
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "## Turns skipped as not human-typed requests")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "| source | reason | turns |\n|---|---|---:|")
+	agg := map[string]int{}
+	for _, r := range s.Rows {
+		for k, v := range r.Skipped {
+			agg[r.Source+"\x00"+k] += v
+		}
+	}
+	for _, k := range sortedKeys(agg) {
+		src, reason, _ := strings.Cut(k, "\x00")
+		fmt.Fprintf(w, "| %s | %s | %d |\n", src, reason, agg[k])
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "## Language detection outcomes (records reaching the language filter)")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "| outcome | records |\n|---|---:|")
+	for _, k := range sortedKeys(s.LangDetail) {
+		fmt.Fprintf(w, "| %s | %d |\n", k, s.LangDetail[k])
+	}
 }

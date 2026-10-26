@@ -154,7 +154,8 @@ func claudeCodeFile(path, host string, contextChars int, st *Stats) ([]corpus.Re
 			reason = "compact-summary"
 		case strings.HasPrefix(l.Entrypoint, "sdk"):
 			reason = "entrypoint-" + l.Entrypoint
-		case l.PromptSource != "" && l.PromptSource != "typed":
+		case l.PromptSource != "" && l.PromptSource != "typed" && l.PromptSource != "queued":
+			// queued = typed by the person while the agent was busy.
 			reason = "prompt-source-" + l.PromptSource
 		case l.Origin != nil && l.Origin.Kind != "" && l.Origin.Kind != "human":
 			reason = "origin-" + l.Origin.Kind
@@ -164,6 +165,9 @@ func claudeCodeFile(path, host string, contextChars int, st *Stats) ([]corpus.Re
 			reason = "empty"
 		case strings.HasPrefix(strings.TrimSpace(text), "[Request interrupted"):
 			reason = "interrupt-marker"
+		case strings.HasPrefix(strings.TrimSpace(text), "This session is being continued from a previous conversation"):
+			// Compaction summary from client versions that predate isCompactSummary.
+			reason = "compact-summary-unflagged"
 		default:
 			for _, tag := range injectedTags {
 				if strings.Contains(text, tag) {
