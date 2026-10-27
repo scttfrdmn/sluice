@@ -56,11 +56,33 @@ assistant part.
 
 ## claude.ai export
 
-`corpus/raw/claude-export/conversations.json`. **Not yet probed: no
-export is present yet.** The extractor assumes the PROJECT.md §5 structure
-(array of conversations with `uuid` and `chat_messages[]` carrying `uuid`,
-`sender`, `text`, `created_at`, `content[]`, `attachments[]`, `files[]`).
-It will be checked against `probe claude-export` before use.
+Probed 2026-10-27 (`probe claude-export
+corpus/raw/claude-export/conversations.json`) on 1,417 conversations. The
+export now comes as a manifest of per-category zips (`conversations`,
+`projects`, `memories`, `design_chats`, `frames`, `artifact_data`,
+`claude_code_cloud`, `feedback`, `light_metadata`). Only
+`conversations-000.zip` is used; it holds one `conversations.json`, an array
+in the PROJECT.md §5 shape. `claude_code_cloud` holds routine definitions
+and runs, not session prompts, and is not harvested.
+
+| field | type | observed | used as |
+|---|---|---|---|
+| `uuid` | string | all | origin_ref, session_id |
+| `chat_messages[].uuid` | string | 34,054 | origin_ref |
+| `chat_messages[].sender` | string | `assistant` 17,077, `human` 16,977 | keep `human` |
+| `chat_messages[].text` | string | all | prompt text; content `text` blocks if empty |
+| `chat_messages[].created_at` | string | all | timestamp |
+| `chat_messages[].content[]` | array | all | human: `text` 16,327, `injected_prompt_block` 1,079, `document` 213, `tool_result` 4, `image` 2 |
+| `chat_messages[].attachments[]`, `files[]` | array | all | has_attachment |
+
+`injected_prompt_block` is system-injected context (`injection_source`:
+`melange_tombstone` 566, `memory_block_head` 257, `date_note` 116,
+`deferred_tools_delta` 56, `agent_listing` 51, `mcp_instructions_delta` 16,
+`ps_suffix` 12, `client_hidden_context` 5). Its body is in `prompt`, never
+appears in `text`, and is not harvested. 234 human messages carry only
+injected blocks and are skipped as empty. Assistant blocks seen:
+`tool_use`, `tool_result`, `thinking`, `text`, `token_budget`, `flag`;
+only `text` is used for context.
 
 ## ChatGPT export
 
