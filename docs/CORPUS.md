@@ -1,21 +1,34 @@
 # Corpus
 
-Harvest run `r1`, 2026-10-26.
+Harvest run `r1b`, 2026-10-27.
 
 Aggregate counts only. Raw inputs and harvested records stay on the local machine (`corpus/`, `runs/`, both gitignored).
 
 ## Source × host
 
-| source | host | candidates | kept | with context | with attachment | issue bodies | credential | short | non-English | near-dup |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| claude-code | castor.local | 190 | 167 | 163 | 0 | 0 | 0 | 19 | 0 | 4 |
-| claude-code | juno.local | 990 | 497 | 478 | 0 | 0 | 84 | 313 | 1 | 95 |
-| claude-code | terror | 7672 | 5650 | 5547 | 21 | 0 | 223 | 1452 | 4 | 343 |
-| repos | - | 6591 | 6421 | 0 | 0 | 6421 | 127 | 2 | 0 | 41 |
-| wildchat | - | 4800 | 3000 | 0 | 0 | 0 | 3 | 194 | 28 | 940 |
-| **total** | | 20243 | 15735 | | | | | | | |
+| source | host | candidates | kept | human | agent | unknown | with context | with attachment | issue bodies | credential | short | non-English | near-dup |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| claude-code | castor.local | 190 | 167 | 167 | 0 | 0 | 163 | 0 | 0 | 0 | 19 | 0 | 4 |
+| claude-code | juno.local | 990 | 497 | 497 | 0 | 0 | 478 | 0 | 0 | 84 | 313 | 1 | 95 |
+| claude-code | terror | 7672 | 5650 | 5650 | 0 | 0 | 5547 | 21 | 0 | 223 | 1452 | 4 | 343 |
+| repos | - | 6632 | 6455 | 0 | 3802 | 2653 | 0 | 0 | 6438 | 131 | 2 | 0 | 44 |
+| wildchat | - | 4800 | 3000 | 3000 | 0 | 0 | 0 | 0 | 0 | 3 | 194 | 28 | 940 |
+| **total** | | 20284 | 15769 | 9314 | 3802 | 2653 | | | | | | | |
 
-Split: calibration 7740, test 7995.
+Split: calibration 7757, test 8012.
+
+## Author kind by rule (kept records)
+
+`author_kind` identifies agent-written requests; they are kept at full weight (PROJECT.md §5). Issue rule: `issue-footer` = generated-with footer, `issue-structure` = ≥2 `## ` headings and ≥400 chars (both → agent); `issue-no-rule` → unknown. Repo prompt files → agent; Claude Code typed/queued turns, chat-export turns and WildChat → human.
+
+| source | rule | records |
+|---|---|---:|
+| claude-code | claude-code-turn | 6314 |
+| repos | issue-footer | 4 |
+| repos | issue-no-rule | 2653 |
+| repos | issue-structure | 3781 |
+| repos | repo-prompt-file | 17 |
+| wildchat | wildchat-user-turn | 3000 |
 
 ## Credential drops by pattern
 
@@ -32,7 +45,7 @@ Hard drop of the whole record. "context-only" means the match was in `context_te
 | google-api-key (request) | 1 |
 | private-key (request) | 1 |
 | s3-bucket-uri (context-only) | 127 |
-| s3-bucket-uri (request) | 116 |
+| s3-bucket-uri (request) | 120 |
 
 ## Turns skipped as not human-typed requests
 
@@ -52,7 +65,6 @@ Hard drop of the whole record. "context-only" means the match was in `context_te
 | claude-code | tag-local-command-stdout | 59 |
 | repos | excluded-repo | 1 |
 | repos | gh-issue-list-failed | 5 |
-| repos | issue-agent-generated | 4 |
 | repos | issue-empty | 9 |
 | repos | issue-not-owner | 1826 |
 | wildchat | beyond-sample-size | 635 |
@@ -64,7 +76,7 @@ Hard drop of the whole record. "context-only" means the match was in `context_te
 | ara | 2 |
 | dan | 1 |
 | deu | 4 |
-| eng | 17659 |
+| eng | 17696 |
 | eng-low-ces | 1 |
 | eng-low-dan | 4 |
 | eng-low-deu | 24 |
@@ -92,3 +104,15 @@ Hard drop of the whole record. "context-only" means the match was in `context_te
 | rus | 5 |
 | swe | 1 |
 | zho | 6 |
+
+## E0 subsample
+
+Seeded (seed 1000), stratified draw from the calibration split, up to 1000 requests per stratum (PROJECT.md §5). E0 runs on these requests only.
+
+| stratum | selected | available |
+|---|---:|---:|
+| claude-code | 1000 | 3165 |
+| repos:issue | 1000 | 3153 |
+| repos:prompt-file | 6 | 6 |
+| wildchat | 1000 | 1433 |
+| **total** | 3006 | |

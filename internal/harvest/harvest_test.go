@@ -134,6 +134,13 @@ func TestFixtureHarvest(t *testing.T) {
 		if r.Split != "calibration" && r.Split != "test" {
 			t.Errorf("bad split %q", r.Split)
 		}
+		want := corpus.AuthorHuman
+		if r.Source == corpus.SourceRepos {
+			want = corpus.AuthorAgent
+		}
+		if r.AuthorKind != want || r.AuthorRule == "" {
+			t.Errorf("%s: author_kind %q rule %q, want %q", r.OriginRef, r.AuthorKind, r.AuthorRule, want)
+		}
 	}
 	want := map[string]int{corpus.SourceClaudeCode: 7, corpus.SourceClaudeExport: 4, corpus.SourceChatGPT: 2, corpus.SourceRepos: 3, corpus.SourceWildchat: 4}
 	for s, n := range want {
@@ -157,5 +164,40 @@ func TestFixtureHarvest(t *testing.T) {
 	}
 	if st.rows[Key{corpus.SourceClaudeCode, "testhost"}].Dropped["near-duplicate"] != 1 {
 		t.Errorf("near-duplicate not dropped")
+	}
+}
+
+func TestPromptFileGlobs(t *testing.T) {
+	yes := []string{"CC_PROMPT.md", "PROJECT.md", "feature.prompt.md", "ember kickoff prompt.md", "Sluice_Kickoff_Prompt.md",
+		"X_CLAUDE_CODE_PROMPT.md", "AUDIT_PROMPT.md", "phase2_prompt.md", "prompts.md"}
+	no := []string{"README.md", "README_PROMPT.md", "CHANGELOG.md", "LICENSE.md", "prompt.txt", "notes.md", "tag_prompt.txt", "project.md"}
+	for _, n := range yes {
+		if !isPromptFile(n) {
+			t.Errorf("want prompt file: %q", n)
+		}
+	}
+	for _, n := range no {
+		if isPromptFile(n) {
+			t.Errorf("want not a prompt file: %q", n)
+		}
+	}
+}
+
+func TestIssueAuthor(t *testing.T) {
+	long := strings.Repeat("Some detail about the change. ", 15)
+	cases := []struct {
+		body, kind, rule string
+	}{
+		{"Fix it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)", corpus.AuthorAgent, corpus.RuleIssueFooter},
+		{"## Summary\n" + long + "\n## Plan\n- a\n", corpus.AuthorAgent, corpus.RuleIssueStructure},
+		{"## Summary\nshort\n## Plan\n- a\n", corpus.AuthorUnknown, corpus.RuleIssueNone},
+		{"## Only one heading\n" + long, corpus.AuthorUnknown, corpus.RuleIssueNone},
+		{"the parser panics on empty input", corpus.AuthorUnknown, corpus.RuleIssueNone},
+	}
+	for _, c := range cases {
+		k, r := issueAuthor(c.body)
+		if k != c.kind || r != c.rule {
+			t.Errorf("issueAuthor(%.40q) = %s/%s, want %s/%s", c.body, k, r, c.kind, c.rule)
+		}
 	}
 }

@@ -93,14 +93,23 @@ corpus/raw/wildchat/sample.jsonl
 ```
 
 Claude Code logs from other machines are rsynced into `corpus/raw/claude-code/<host>/` by `make pull-sessions` (hosts in config: at least the local machine, `juno.local`, `castor.local`); the harvester records `host` in `origin_ref` and reports per-host counts.
-3. **Repo prompts.** Walk `~/src/*`: `CC_PROMPT.md`, `PROJECT.md`, `*.prompt.md`, GitHub issue bodies authored by the owner (via `gh issue list --json body,author`). These are compound by construction.
+3. **Repo prompts.** Walk `~/src/*`: `PROJECT.md`, and files matching (case-insensitive) `*kickoff*prompt*.md`, `*CLAUDE_CODE_PROMPT*.md`, `*PROMPT*.md`, `*_prompt.md`, `*.prompt.md` — excluding `README*`, `CHANGELOG*`, `LICENSE*` and anything under `node_modules`, `vendor`, `.git`; plus GitHub issue bodies authored by the owner (via `gh issue list --json body,author`). These are compound by construction. The harvest writes the matched file list with each file's outcome to `runs/<id>/repo_prompt_files.txt`.
 4. **Public control.** WildChat-1M, English, first user turn only, uniform sample of 3,000. Controls for the owner's traffic being unrepresentative.
 
 Record schema:
 
 ```
-id, source, origin_ref, timestamp, text, context_text, standalone, lang, has_attachment, split
+id, source, origin_ref, timestamp, author_kind, author_rule, text, context_text, standalone, lang, has_attachment, split
 ```
+
+**Author kind.** Agent-written requests are normal traffic in an agentic deployment and belong in the corpus: they are identified, never dropped or down-weighted. `author_kind` ∈ {`human`, `agent`, `unknown`}, assigned per source, and `author_rule` records which rule fired:
+- Claude Code typed and queued turns → `human` (`claude-code-turn`). Chat-export human turns → `human` (`chat-export-turn`). WildChat → `human` (`wildchat-user-turn`).
+- GitHub issues → `agent` if the "Generated with Claude Code" footer is present (`issue-footer`) or the body has ≥2 `## ` headings and ≥400 chars (`issue-structure`); otherwise `unknown` (`issue-no-rule`).
+- Repo prompt files → `agent` (`repo-prompt-file`): drafted in chat and handed off.
+
+Every E0 number is reported by `author_kind` and by source as well as pooled. Next to the natural-weight pooled ρ the report gives a source-balanced pooled ρ (equal total weight per source), so a dominant source's share is visible rather than hidden.
+
+**E0 subsample.** E0 does not run the full corpus. `harvest subsample` draws a seeded, stratified subsample of the calibration split: 1,000 requests per stratum (Claude Code, GitHub issues, WildChat, each chat export once present; repo prompt files are their own stratum and are all taken, being few). The ids, seed and per-stratum counts are written to `runs/<id>/subsample.json`; `tag`, and through it `matrix`, `label` and `report`, restrict to it. The full corpus is reserved for E1 tagger training and E2.
 
 **Context-dependent requests.** Many turns in session logs assume prior context ("fix that", "now the tests"). Sent bare, they score as uniform failures and shrink ρ artificially. Handling:
 - `context_text` = the preceding user turn plus the preceding assistant turn's text blocks only (no tool results), truncated to 2,000 tokens, oldest first. First turns have empty context.
@@ -144,7 +153,7 @@ Budget estimate: 6,000 requests × ~2.2 leaves × 6 models × 2 draws ≈ 160k c
 - Strong model is the tagger for E0 (no encoder yet). Tagger output is cached per request text hash.
 - Two draws per cell, not more; the noise analysis reports the flip rate and that decides whether a third is needed.
 - Judges are from a different provider than the model being judged where possible; never the same model.
-- Owner traffic and public control are reported separately and pooled; the headline number is the pooled one. Within owner traffic, Claude Code, claude.ai, and ChatGPT sources are also reported separately, since the three have different compound fractions by construction.
+- Owner traffic and public control are reported separately and pooled; the headline number is the pooled one. Every source is also reported separately (Claude Code, claude.ai, ChatGPT, repos, WildChat), since they have different compound fractions by construction, and every number is also broken out by `author_kind`, with a source-balanced pooled ρ beside the natural-weight one (§5).
 - `corpus/` is gitignored in full. Raw exports and harvested records never leave the local machine except as aggregate counts in `docs/CORPUS.md`.
 - Prices from the Bedrock price list on the run date, stored with the matrix. Latency measured per call, including queueing.
 - Account IDs, bucket names, and credentials never enter the corpus or the repo. Batch-inference S3 bucket and IAM role come from environment variables or a gitignored local config.

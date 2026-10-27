@@ -17,23 +17,60 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/scttfrdmn/sluice/internal/corpus"
 )
 
-// Repo prompts: CC_PROMPT.md, PROJECT.md and *.prompt.md under each
-// top-level directory of the repos root, plus owner-authored GitHub issue
-// bodies. These are compound by construction (PROJECT.md §5).
+// Repo prompts: prompt files (promptGlobs, PROJECT.md) under each top-level
+// directory of the repos root, plus owner-authored GitHub issue bodies.
+// These are compound by construction (PROJECT.md §5).
 
 var skipDirs = map[string]bool{".git": true, "node_modules": true, "vendor": true, ".venv": true, "venv": true, "target": true, "dist": true, "build": true, "__pycache__": true, ".terraform": true}
 
+// promptGlobs match file basenames case-insensitively. *prompt*.md already
+// covers the others; they are listed so the intent stays visible.
+var promptGlobs = []string{"*kickoff*prompt*.md", "*claude_code_prompt*.md", "*prompt*.md", "*_prompt.md", "*.prompt.md"}
+
+// excludedPrefixes are basenames never treated as prompt files.
+var excludedPrefixes = []string{"readme", "changelog", "license"}
+
 func isPromptFile(name string) bool {
-	return name == "CC_PROMPT.md" || name == "PROJECT.md" || strings.HasSuffix(name, ".prompt.md")
+	if name == "PROJECT.md" {
+		return true
+	}
+	n := strings.ToLower(name)
+	for _, p := range excludedPrefixes {
+		if strings.HasPrefix(n, p) {
+			return false
+		}
+	}
+	for _, g := range promptGlobs {
+		if ok, _ := filepath.Match(g, n); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // generatedFooter marks issue bodies written by an agent under the owner's
-// account. They are not owner-typed traffic, so they are skipped and counted.
+// account.
 var generatedFooter = regexp.MustCompile(`(?i)generated with \[?claude code|co-authored-by: claude|🤖 generated with`)
+
+var reH2 = regexp.MustCompile(`(?m)^## `)
+
+// issueAuthor assigns author_kind to an owner issue body (PROJECT.md §5):
+// agent if the generated footer is present, or the body has ≥2 "## "
+// headings and ≥400 characters; otherwise unknown.
+func issueAuthor(body string) (kind, rule string) {
+	switch {
+	case generatedFooter.MatchString(body):
+		return corpus.AuthorAgent, corpus.RuleIssueFooter
+	case len(reH2.FindAllStringIndex(body, -1)) >= 2 && utf8.RuneCountInString(body) >= 400:
+		return corpus.AuthorAgent, corpus.RuleIssueStructure
+	}
+	return corpus.AuthorUnknown, corpus.RuleIssueNone
+}
 
 // ReposOptions controls the repos source.
 type ReposOptions struct {
@@ -84,10 +121,12 @@ func harvestRepos(ctx context.Context, o ReposOptions, st *Stats) ([]corpus.Reco
 			}
 			rel, _ := filepath.Rel(o.Root, p)
 			out = append(out, corpus.Record{
-				Source:    src,
-				OriginRef: "repos:file:" + filepath.ToSlash(rel),
-				Timestamp: ts,
-				Text:      string(b),
+				Source:     src,
+				AuthorKind: corpus.AuthorAgent,
+				AuthorRule: corpus.RulePromptFile,
+				OriginRef:  "repos:file:" + filepath.ToSlash(rel),
+				Timestamp:  ts,
+				Text:       string(b),
 			})
 			return nil
 		})
@@ -180,16 +219,17 @@ func harvestIssues(ctx context.Context, repos []string, owner string, st *Stats)
 				switch {
 				case i.Author.Login != owner:
 					st.skip(src, "", "issue-not-owner", 1)
-				case generatedFooter.MatchString(i.Body):
-					st.skip(src, "", "issue-agent-generated", 1)
 				case strings.TrimSpace(i.Body) == "":
 					st.skip(src, "", "issue-empty", 1)
 				default:
+					kind, rule := issueAuthor(i.Body)
 					out = append(out, corpus.Record{
-						Source:    src,
-						OriginRef: fmt.Sprintf("repos:issue:%s#%d", r, i.Number),
-						Timestamp: i.CreatedAt,
-						Text:      i.Body,
+						Source:     src,
+						AuthorKind: kind,
+						AuthorRule: rule,
+						OriginRef:  fmt.Sprintf("repos:issue:%s#%d", r, i.Number),
+						Timestamp:  i.CreatedAt,
+						Text:       i.Body,
 					})
 				}
 			}
@@ -230,11 +270,13 @@ func harvestWildchat(path string, st *Stats) ([]corpus.Record, error) {
 			return nil, fmt.Errorf("%s:%d: %w", path, i+1, err)
 		}
 		out = append(out, corpus.Record{
-			Source:    corpus.SourceWildchat,
-			OriginRef: fmt.Sprintf("%s:%s", w.Dataset, w.ID),
-			Timestamp: w.Timestamp,
-			Text:      w.Text,
-			Rank:      w.Rank,
+			Source:     corpus.SourceWildchat,
+			AuthorKind: corpus.AuthorHuman,
+			AuthorRule: corpus.RuleWildchat,
+			OriginRef:  fmt.Sprintf("%s:%s", w.Dataset, w.ID),
+			Timestamp:  w.Timestamp,
+			Text:       w.Text,
+			Rank:       w.Rank,
 		})
 	}
 	return out, nil

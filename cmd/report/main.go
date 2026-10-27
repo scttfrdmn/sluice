@@ -85,6 +85,14 @@ func run() error {
 	if in.Records, err = jsonl.Read[corpus.Record](dir.Records()); err != nil {
 		return err
 	}
+	ids, ss, err := corpus.ReadSubsample(dir.Subsample())
+	if err != nil {
+		return err
+	}
+	if ids != nil {
+		in.Records = corpus.FilterSubsample(in.Records, ids)
+		in.Subsample = ss
+	}
 	if in.Tags, err = jsonl.Read[corpus.TagResult](dir.Tags()); err != nil {
 		return err
 	}

@@ -240,6 +240,7 @@ func Leaves(records map[string]corpus.Record, tags []corpus.TagResult) []corpus.
 				ContextText:     r.ContextText,
 				Standalone:      t.Standalone,
 				Source:          r.Source,
+				AuthorKind:      r.AuthorKind,
 				Host:            r.Host,
 				Split:           r.Split,
 				TaxonomyVersion: t.TaxonomyVersion,

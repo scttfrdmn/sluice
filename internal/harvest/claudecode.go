@@ -188,6 +188,8 @@ func claudeCodeFile(path, host string, contextChars int, st *Stats) ([]corpus.Re
 		}
 		out = append(out, corpus.Record{
 			Source:        src,
+			AuthorKind:    corpus.AuthorHuman,
+			AuthorRule:    corpus.RuleClaudeCodeTurn,
 			Host:          host,
 			OriginRef:     fmt.Sprintf("claude-code:%s:%s:%s", host, l.SessionID, l.UUID),
 			Timestamp:     l.Timestamp,

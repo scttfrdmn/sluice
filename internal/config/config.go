@@ -140,6 +140,11 @@ type Harvest struct {
 	WildchatOversample float64 `yaml:"wildchat_oversample"`
 	WildchatDataset    string  `yaml:"wildchat_dataset"`
 	WildchatFallback   string  `yaml:"wildchat_fallback"`
+	// E0PerStratum and E0Split define the E0 subsample: this many requests
+	// per stratum (source; repos split into issues and prompt files) from
+	// this split. The full corpus is for E1 tagger training and E2.
+	E0PerStratum int    `yaml:"e0_per_stratum"`
+	E0Split      string `yaml:"e0_split"`
 }
 
 // Report configures cmd/report.
@@ -157,6 +162,7 @@ type Seeds struct {
 	Wildchat  uint64 `yaml:"wildchat"`
 	Bootstrap uint64 `yaml:"bootstrap"`
 	Minhash   uint64 `yaml:"minhash"`
+	E0Sample  uint64 `yaml:"e0_sample"`
 }
 
 // Prompts names the prompt template files.

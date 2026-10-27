@@ -15,8 +15,10 @@ Every stage is resumable, and model outputs are cached by SHA-256 of their input
 
 | stage | reads | writes |
 |---|---|---|
-| `harvest` | `corpus/raw/**` | `records.jsonl`, `harvest_stats.json` |
-| `tag` | `records.jsonl` | `tags.jsonl`, `leaves.jsonl` |
+| `harvest` | `corpus/raw/**` | `records.jsonl`, `harvest_stats.json`, `repo_prompt_files.txt` |
+| `harvest subsample` | `records.jsonl` | `subsample.json` (E0 subsample) |
+| `estimate` | `records.jsonl`, `subsample.json` | projected spend (stdout) |
+| `tag` | `records.jsonl`, `subsample.json` | `tags.jsonl`, `leaves.jsonl` |
 | `matrix` | `leaves.jsonl` | `matrix/part-*.parquet` |
 | `label` | leaves, matrix | `refs.jsonl`, `labels.jsonl`, `matrix_labeled.parquet` |
 | `report` | all of the above | `report.md`, `report.json`, `*.png` |

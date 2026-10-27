@@ -6,6 +6,16 @@ semantic versioning on the 0.x series.
 
 ## [Unreleased]
 
+### Added
+- `author_kind` (`human`/`agent`/`unknown`) and `author_rule` on every record and leaf. Agent-written GitHub issues (generated footer, or ≥2 `## ` headings and ≥400 chars) are kept and identified instead of skipped.
+- `harvest subsample`: seeded, stratified E0 subsample of the calibration split (1,000 per stratum) written to `runs/<id>/subsample.json`; `tag` and `report` restrict to it (`tag -all` overrides).
+- `estimate`: projected E0 spend by model and stage from the price table and the subsample's token statistics.
+- Report: every table broken out by source and by `author_kind`; a source-balanced pooled ρ next to the natural-weight one; noise by group; class histogram by group.
+- `runs/<id>/repo_prompt_files.txt`: every matched repo prompt file and its outcome.
+
+### Changed
+- Repo prompt files match case-insensitive globs (`*kickoff*prompt*.md`, `*CLAUDE_CODE_PROMPT*.md`, `*PROMPT*.md`, `*_prompt.md`, `*.prompt.md`) plus `PROJECT.md`, excluding `README*`, `CHANGELOG*`, `LICENSE*`.
+
 ## [0.1.0] - 2026-10-26
 
 ### Added

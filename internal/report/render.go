@@ -31,11 +31,29 @@ func (r *Report) Markdown(w io.Writer) {
 		p("| %s | `%s` | %s | %s | %.4g | %.4g |\n", m.Name, m.ID, m.Provider, m.Tier, m.InPerM, m.OutPerM)
 	}
 
-	p("\n## 1. Corpus\n\n| source | requests | tagged | tag_failed | leaves | mean leaves/request | compound (≥2 leaves) | standalone |\n|---|---:|---:|---:|---:|---:|---:|---:|\n")
-	for _, c := range r.Corpus {
-		p("| %s | %d | %d | %d | %d | %.2f | %.1f%% | %.1f%% |\n", c.Source, c.Requests, c.Tagged, c.TagFailed, c.Leaves, c.MeanLeaves, 100*c.FracCompound, 100*c.FracStandalone)
+	p("\n## 1. Corpus\n\n")
+	if ss := r.Subsample; ss != nil {
+		p("E0 subsample: split %s, seed %d, up to %d requests per stratum (ids in `subsample.json`).\n\n| stratum | selected | available |\n|---|---:|---:|\n", ss.Split, ss.Seed, ss.PerStratum)
+		for _, k := range sortedKeys(ss.Available) {
+			p("| %s | %d | %d |\n", k, ss.Selected[k], ss.Available[k])
+		}
+		p("\n")
 	}
-	p("\nClass histogram (all leaves):\n\n| class | leaves |\n|---|---:|\n")
+	corpusTable := func(title string, rows []CorpusRow) {
+		p("%s\n\n| source | author_kind | requests | tagged | tag_failed | leaves | mean leaves/request | compound (≥2 leaves) | standalone |\n|---|---|---:|---:|---:|---:|---:|---:|---:|\n", title)
+		for _, c := range rows {
+			p("| %s | %s | %d | %d | %d | %d | %.2f | %.1f%% | %.1f%% |\n", orAll(c.Source), orAll(c.AuthorKind), c.Requests, c.Tagged, c.TagFailed, c.Leaves, c.MeanLeaves, 100*c.FracCompound, 100*c.FracStandalone)
+		}
+		p("\n")
+	}
+	corpusTable("By source:", r.Corpus)
+	corpusTable("By author_kind:", r.CorpusByAuthor)
+	corpusTable("By source × author_kind:", r.CorpusCross)
+	p("Class histogram (leaves; total and by group):\n\n| class | leaves |")
+	for _, g := range r.BreakdownCols {
+		p(" %s |", g)
+	}
+	p("\n|---|---:|%s\n", strings.Repeat("---:|", len(r.BreakdownCols)))
 	type kv struct {
 		k string
 		v int
@@ -46,7 +64,11 @@ func (r *Report) Markdown(w io.Writer) {
 	}
 	sort.Slice(hist, func(i, j int) bool { return hist[i].v > hist[j].v || (hist[i].v == hist[j].v && hist[i].k < hist[j].k) })
 	for _, h := range hist {
-		p("| %s | %d |\n", h.k, h.v)
+		p("| %s | %d |", h.k, h.v)
+		for _, g := range r.BreakdownCols {
+			p(" %d |", r.ClassByGroup[h.k][g])
+		}
+		p("\n")
 	}
 	c := r.Coverage
 	p("\nCoverage (split %s): %d leaves, %d with all cells labeled; %d missing cells, %d unlabeled cells.\n", r.RunSplit, c.LeavesInSplit, c.LeavesComplete, c.MissingCells, c.UnlabeledCells)
@@ -54,6 +76,10 @@ func (r *Report) Markdown(w io.Writer) {
 
 	p("\n## 2. Noise\n\n| class | (leaf, model) pairs | draw flip rate | judged cells | judge disagreement |\n|---|---:|---:|---:|---:|\n")
 	for _, n := range r.Noise {
+		p("| %s | %d | %.3f | %d | %.3f |\n", n.Class, n.Pairs, n.FlipRate, n.JudgedCells, n.JudgeDisagree)
+	}
+	p("\nBy group:\n\n| group | (leaf, model) pairs | draw flip rate | judged cells | judge disagreement |\n|---|---:|---:|---:|---:|\n")
+	for _, n := range r.NoiseByGroup {
 		p("| %s | %d | %.3f | %d | %.3f |\n", n.Class, n.Pairs, n.FlipRate, n.JudgedCells, n.JudgeDisagree)
 	}
 
@@ -77,7 +103,7 @@ func (r *Report) Markdown(w io.Writer) {
 		p("\n")
 	}
 
-	p("## 4. Headline\n\nSelection-valid intervals: each of K models at δ/(2K), oracle at δ/2, best-per-class Bonferroni over classes × models. ρ interval: paired bootstrap over requests.\n\n")
+	p("## 4. Headline\n\nSelection-valid intervals: each of K models at δ/(2K), oracle at δ/2, best-per-class Bonferroni over classes × models. ρ interval: paired bootstrap over requests. `pooled (source-balanced)` gives every source equal total weight (point estimates; ρ bootstrap resamples requests within each source; Clopper–Pearson intervals do not apply and are shown as -). Groups: `source:*` by source, `author:*` by author_kind.\n\n")
 	p("| group | leaves | requests | best single | best-per-class | oracle | oracle − best gap | ρ | ρ 95%% |\n|---|---:|---:|---|---|---|---|---:|---|\n")
 	for _, g := range r.GroupOrder {
 		h := r.Groups[g]
@@ -88,8 +114,12 @@ func (r *Report) Markdown(w io.Writer) {
 		if h.RhoCI != nil {
 			rhoCI = iv(*h.RhoCI)
 		}
+		civ := iv
+		if h.Weighting == "source-balanced" {
+			civ = func(certify.Interval) string { return "-" }
+		}
 		p("| %s | %d | %d | %.3f %s (%s) | %.3f %s | %.3f %s | %s | %s | %s |\n", g, h.N, h.NRequests,
-			h.BestSingleAcc, iv(h.BestSingleCI), h.BestSingle, h.BestPerClass, iv(h.BestPerClassCI), h.Oracle, iv(h.OracleCI), iv(h.GapCI), rho, rhoCI)
+			h.BestSingleAcc, civ(h.BestSingleCI), h.BestSingle, h.BestPerClass, civ(h.BestPerClassCI), h.Oracle, civ(h.OracleCI), civ(h.GapCI), rho, rhoCI)
 	}
 
 	p("\n## 5. Cost and latency (measured)\n\nLatency is on-demand calls only, including service-side queueing; batch cells carry batch wall time separately and are excluded.\n\n")
@@ -101,6 +131,13 @@ func (r *Report) Markdown(w io.Writer) {
 	p("\nBest-per-class policy (pooled assignment) vs always-%s over %d leaves, one call per leaf: $%.4f vs $%.4f (ratio %.3f). Excludes tagger ($%.2f total) and labeling ($%.2f total).\n",
 		pol.StrongModel, pol.Leaves, pol.BestPerClassUSD, pol.AlwaysStrongUSD, pol.Ratio, r.TaggerCostUSD, r.LabelCostUSD)
 	p("\nPlots: `accuracy_cost.png`, `class_rho.png`.\n")
+}
+
+func orAll(s string) string {
+	if s == "" {
+		return "all"
+	}
+	return s
 }
 
 func orNone(s string) string {

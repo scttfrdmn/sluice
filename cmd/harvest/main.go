@@ -5,11 +5,14 @@
 // cmd/harvest).
 //
 //	harvest pull-sessions [-config f] [-dest corpus/raw/claude-code]
+//	harvest subsample -run <id> [-per-stratum N] [-split calibration]
 //	harvest -run <id> [-claude-code dir] [-claude-export f] [-chatgpt-export f]
 //	        [-repos dir] [-wildchat N] ...
 //
-// Output: runs/<id>/records.jsonl (local only) and runs/<id>/harvest_stats.json
-// (aggregate counts, publishable).
+// Output: runs/<id>/records.jsonl and runs/<id>/repo_prompt_files.txt (local
+// only) and runs/<id>/harvest_stats.json (aggregate counts, publishable).
+// subsample writes runs/<id>/subsample.json, the E0 subsample that tag,
+// matrix, label and report then restrict to.
 package main
 
 import (
@@ -18,13 +21,17 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/scttfrdmn/sluice/internal/config"
+	"github.com/scttfrdmn/sluice/internal/corpus"
 	"github.com/scttfrdmn/sluice/internal/harvest"
 	"github.com/scttfrdmn/sluice/internal/jsonl"
 	"github.com/scttfrdmn/sluice/internal/rundir"
@@ -49,6 +56,9 @@ func run() error {
 			return err
 		}
 		return harvest.PullSessions(ctx, cfg, *dest, os.Stdout)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "subsample" {
+		return runSubsample(os.Args[2:])
 	}
 
 	var (
@@ -115,7 +125,11 @@ func run() error {
 	if err := harvest.WriteStats(dir.HarvestStats(), st); err != nil {
 		return err
 	}
+	if err := os.WriteFile(dir.PromptFiles(), []byte(strings.Join(append(st.PromptFiles, ""), "\n")), 0o644); err != nil {
+		return err
+	}
 	st.PrintTable(os.Stdout)
+	fmt.Printf("repo prompt files matched: %d (list with outcomes in %s)\n", len(st.PromptFiles), dir.PromptFiles())
 	if *corpusMD != "" {
 		f, err := os.Create(*corpusMD)
 		if err != nil {
@@ -127,6 +141,68 @@ func run() error {
 		}
 	}
 	fmt.Printf("wrote %d records to %s\n", len(recs), dir.Records())
+	return nil
+}
+
+func runSubsample(args []string) error {
+	fs := flag.NewFlagSet("subsample", flag.ExitOnError)
+	cfgPath := fs.String("config", "config/sluice.yaml", "config file")
+	runsRoot := fs.String("runs", "runs", "runs root")
+	runID := fs.String("run", "", "run id (required)")
+	per := fs.Int("per-stratum", 0, "requests per stratum (default: config harvest.e0_per_stratum)")
+	split := fs.String("split", "", "calibration | test | all (default: config harvest.e0_split)")
+	corpusMD := fs.String("corpus-md", "", "append the subsample table to this markdown file (e.g. docs/CORPUS.md)")
+	fs.Parse(args)
+	if *runID == "" {
+		return errors.New("-run is required")
+	}
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if *per == 0 {
+		*per = cfg.Harvest.E0PerStratum
+	}
+	if *split == "" {
+		*split = cfg.Harvest.E0Split
+	}
+	if *per <= 0 {
+		return errors.New("per-stratum must be positive")
+	}
+	dir, err := rundir.Open(*runsRoot, *runID)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(dir.Subsample()); err == nil {
+		return fmt.Errorf("%s exists; the subsample is drawn once per run", dir.Subsample())
+	}
+	recs, err := jsonl.Read[corpus.Record](dir.Records())
+	if err != nil {
+		return err
+	}
+	s := corpus.DrawSubsample(recs, *per, *split, cfg.Seeds.E0Sample)
+	if err := corpus.WriteSubsample(dir.Subsample(), s); err != nil {
+		return err
+	}
+	fmt.Printf("subsample (split %s, seed %d, %d per stratum):\n", s.Split, s.Seed, s.PerStratum)
+	for _, k := range slices.Sorted(maps.Keys(s.Available)) {
+		fmt.Printf("  %-20s %6d of %6d\n", k, s.Selected[k], s.Available[k])
+	}
+	fmt.Printf("wrote %d ids to %s\n", len(s.IDs), dir.Subsample())
+	if *corpusMD != "" {
+		f, err := os.OpenFile(*corpusMD, os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(f, "\n## E0 subsample\n\nSeeded (seed %d), stratified draw from the %s split, up to %d requests per stratum (PROJECT.md §5). E0 runs on these requests only.\n\n| stratum | selected | available |\n|---|---:|---:|\n", s.Seed, s.Split, s.PerStratum)
+		for _, k := range slices.Sorted(maps.Keys(s.Available)) {
+			fmt.Fprintf(f, "| %s | %d | %d |\n", k, s.Selected[k], s.Available[k])
+		}
+		fmt.Fprintf(f, "| **total** | %d | |\n", len(s.IDs))
+		if err := f.Close(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

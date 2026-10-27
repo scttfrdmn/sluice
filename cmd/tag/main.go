@@ -4,7 +4,9 @@
 // Command tag segments every harvested request into leaves with the strong
 // model (CC_PROMPT.md cmd/tag) and writes runs/<id>/tags.jsonl and
 // runs/<id>/leaves.jsonl. Resumable: requests already in tags.jsonl are
-// skipped, and every tagger output is cached by SHA-256 of its input.
+// skipped, and every tagger output is cached by SHA-256 of its input. If
+// runs/<id>/subsample.json exists only those requests are tagged (-all
+// overrides).
 //
 // With -reclass, it instead re-assigns classes to the existing leaves under
 // the taxonomy in -config (one taxonomy iteration, PROJECT.md §4 E0) and
@@ -44,6 +46,7 @@ func run() error {
 		runsRoot = flag.String("runs", "runs", "runs root")
 		runID    = flag.String("run", "", "run id (required)")
 		reclass  = flag.String("reclass", "", "re-tag the leaves of this taxonomy version under the config's taxonomy")
+		all      = flag.Bool("all", false, "tag every record, ignoring runs/<id>/subsample.json (E1 tagger training)")
 	)
 	flag.Parse()
 	if *runID == "" {
@@ -73,6 +76,16 @@ func run() error {
 	recs, err := jsonl.Read[corpus.Record](dir.Records())
 	if err != nil {
 		return err
+	}
+	if !*all {
+		ids, ss, err := corpus.ReadSubsample(dir.Subsample())
+		if err != nil {
+			return err
+		}
+		if ids != nil {
+			recs = corpus.FilterSubsample(recs, ids)
+			fmt.Printf("tag: E0 subsample: %d requests (split %s, %d per stratum)\n", len(recs), ss.Split, ss.PerStratum)
+		}
 	}
 	byID := make(map[string]corpus.Record, len(recs))
 	for _, r := range recs {

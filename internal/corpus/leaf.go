@@ -54,6 +54,7 @@ type Leaf struct {
 	ContextText     string `json:"context_text,omitempty"`
 	Standalone      bool   `json:"standalone"`
 	Source          string `json:"source"`
+	AuthorKind      string `json:"author_kind"`
 	Host            string `json:"host,omitempty"`
 	Split           string `json:"split"`
 	TaxonomyVersion string `json:"taxonomy_version"`

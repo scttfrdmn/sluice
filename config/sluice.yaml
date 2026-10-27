@@ -80,6 +80,8 @@ harvest:
   wildchat_oversample: 1.6
   wildchat_dataset: allenai/WildChat-1M
   wildchat_fallback: lmsys/lmsys-chat-1m
+  e0_per_stratum: 1000
+  e0_split: calibration
 
 report:
   delta: 0.05
@@ -93,6 +95,7 @@ seeds:
   wildchat: 3000
   bootstrap: 17
   minhash: 85
+  e0_sample: 1000
 
 prompts:
   tag: tag_prompt.txt

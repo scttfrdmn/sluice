@@ -2,7 +2,7 @@
 
 GO      ?= go
 BIN     := bin
-CMDS    := harvest tag matrix label report probe
+CMDS    := harvest tag matrix label report probe estimate
 CONFIG  ?= config/sluice.yaml
 RUN     ?=
 RUNS    ?= runs
@@ -37,6 +37,7 @@ e0: build
 		-repos $(E0_RAW)/repos -issues=false \
 		-wildchat 4 -wildchat-file $(E0_RAW)/wildchat/sample.jsonl \
 		-review $(RUNS)/$(E0_RUN)/review
+	$(BIN)/harvest subsample -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN)
 	$(BIN)/tag    -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN)
 	$(BIN)/matrix -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN)
 	$(BIN)/label  -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN)

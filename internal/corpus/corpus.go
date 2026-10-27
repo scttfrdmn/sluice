@@ -17,6 +17,28 @@ const (
 // the public control).
 func Owner(source string) bool { return source != SourceWildchat }
 
+// Author kinds (PROJECT.md §5). Agent-written requests are normal traffic in
+// an agentic deployment; they are identified, not dropped or down-weighted.
+const (
+	AuthorHuman   = "human"
+	AuthorAgent   = "agent"
+	AuthorUnknown = "unknown"
+)
+
+// AuthorKinds lists the kinds in report order.
+var AuthorKinds = []string{AuthorHuman, AuthorAgent, AuthorUnknown}
+
+// Author rules: which rule assigned author_kind.
+const (
+	RuleClaudeCodeTurn = "claude-code-turn"   // typed or queued turn
+	RuleChatExport     = "chat-export-turn"   // human turn in a claude.ai/ChatGPT export
+	RuleWildchat       = "wildchat-user-turn" // public-control first user turn
+	RuleIssueFooter    = "issue-footer"       // "Generated with Claude Code" footer
+	RuleIssueStructure = "issue-structure"    // ≥2 "## " headings and ≥400 chars
+	RuleIssueNone      = "issue-no-rule"      // neither fired
+	RulePromptFile     = "repo-prompt-file"   // drafted in chat, handed off
+)
+
 // Record is one harvested request.
 type Record struct {
 	ID        string `json:"id"`
@@ -24,7 +46,11 @@ type Record struct {
 	Host      string `json:"host,omitempty"`
 	OriginRef string `json:"origin_ref"`
 	Timestamp string `json:"timestamp,omitempty"`
-	Text      string `json:"text"`
+	// AuthorKind is human, agent or unknown; AuthorRule names the rule that
+	// assigned it.
+	AuthorKind string `json:"author_kind"`
+	AuthorRule string `json:"author_rule"`
+	Text       string `json:"text"`
 	// ContextText is the preceding user turn plus the preceding assistant
 	// turn's text blocks, truncated to the configured token budget (most
 	// recent text kept). Empty for first turns.

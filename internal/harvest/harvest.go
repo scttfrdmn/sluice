@@ -54,6 +54,8 @@ type Row struct {
 	WithContext int            `json:"with_context"`
 	WithAttach  int            `json:"with_attachment"`
 	IssueBodies int            `json:"issue_bodies"`
+	// ByAuthor counts kept records by author_kind.
+	ByAuthor map[string]int `json:"by_author_kind"`
 	Skipped     map[string]int `json:"skipped,omitempty"`
 	Dropped     map[string]int `json:"dropped,omitempty"`
 }
@@ -66,17 +68,24 @@ type Stats struct {
 	LangDetail  map[string]int `json:"lang_detail"`
 	Rows        []*Row         `json:"rows"`
 	Splits      map[string]int `json:"splits"`
+	// AuthorRules counts kept records by source and the author rule that
+	// fired ("source rule").
+	AuthorRules map[string]int `json:"author_rules"`
+	// PromptFiles lists every repo prompt file the globs matched, as
+	// "outcome<TAB>path" (kept, or the filter that dropped it). Local only:
+	// not written to harvest_stats.json.
+	PromptFiles []string `json:"-"`
 }
 
 func newStats() *Stats {
-	return &Stats{rows: map[Key]*Row{}, PatternHits: map[string]int{}, LangDetail: map[string]int{}, Splits: map[string]int{}}
+	return &Stats{rows: map[Key]*Row{}, PatternHits: map[string]int{}, LangDetail: map[string]int{}, Splits: map[string]int{}, AuthorRules: map[string]int{}}
 }
 
 func (s *Stats) row(source, host string) *Row {
 	k := Key{source, host}
 	r := s.rows[k]
 	if r == nil {
-		r = &Row{Key: k, Skipped: map[string]int{}, Dropped: map[string]int{}}
+		r = &Row{Key: k, Skipped: map[string]int{}, Dropped: map[string]int{}, ByAuthor: map[string]int{}}
 		s.rows[k] = r
 	}
 	return r
@@ -145,6 +154,12 @@ func Run(ctx context.Context, cfg *config.Config, o Options) ([]corpus.Record, *
 		}
 	}
 
+	fate := map[string]string{} // repo prompt file -> outcome
+	setFate := func(r corpus.Record, outcome string) {
+		if f, ok := strings.CutPrefix(r.OriginRef, "repos:file:"); ok {
+			fate[f] = outcome
+		}
+	}
 	for i := range cands {
 		r := &cands[i]
 		r.ID = recordID(r.Source, r.OriginRef)
@@ -166,18 +181,21 @@ func Run(ctx context.Context, cfg *config.Config, o Options) ([]corpus.Record, *
 		}
 		if name != "" {
 			row.Dropped["credential"]++
+			setFate(r, "dropped:credential")
 			st.PatternHits[name+" ("+where+")"]++
 			credDrops = append(credDrops, Drop{Reason: name, Source: r.Source, OriginRef: r.OriginRef, Offset: off, Text: clip(r.Text, 2000)})
 			continue
 		}
 		if utf8.RuneCountInString(strings.TrimSpace(r.Text)) < cfg.Harvest.MinChars {
 			row.Dropped["short"]++
+			setFate(r, "dropped:short")
 			continue
 		}
 		lr := detectEnglish(r.Text)
 		st.LangDetail[lr.Lang]++
 		if !lr.English {
 			row.Dropped["non-english"]++
+			setFate(r, "dropped:non-english")
 			langDrops = append(langDrops, Drop{Reason: "lang-" + lr.Lang, Source: r.Source, OriginRef: r.OriginRef, Text: clip(r.Text, 600)})
 			continue
 		}
@@ -206,6 +224,7 @@ func Run(ctx context.Context, cfg *config.Config, o Options) ([]corpus.Record, *
 	for i, r := range pass {
 		if dupOf[i] >= 0 {
 			st.row(r.Source, r.Host).Dropped["near-duplicate"]++
+			setFate(r, "dropped:near-duplicate")
 			continue
 		}
 		kept = append(kept, r)
@@ -247,9 +266,15 @@ func Run(ctx context.Context, cfg *config.Config, o Options) ([]corpus.Record, *
 		if strings.HasPrefix(kept[i].OriginRef, "repos:issue:") {
 			row.IssueBodies++
 		}
+		setFate(kept[i], "kept")
+		row.ByAuthor[kept[i].AuthorKind]++
+		st.AuthorRules[kept[i].Source+" "+kept[i].AuthorRule]++
 		st.Splits[kept[i].Split]++
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].ID < kept[j].ID })
+	for _, f := range sortedKeys(fate) {
+		st.PromptFiles = append(st.PromptFiles, fate[f]+"\t"+f)
+	}
 	st.finish()
 
 	if o.ReviewDir != "" {
@@ -334,6 +359,10 @@ func (s *Stats) PrintTable(w io.Writer) {
 	for _, k := range sortedKeys(agg) {
 		fmt.Fprintf(w, "  %-40s %d\n", k, agg[k])
 	}
+	fmt.Fprintln(w, "kept by author rule:")
+	for _, k := range sortedKeys(s.AuthorRules) {
+		fmt.Fprintf(w, "  %-40s %d\n", k, s.AuthorRules[k])
+	}
 	fmt.Fprintf(w, "split: calibration %d, test %d\n", s.Splits["calibration"], s.Splits["test"])
 }
 
@@ -344,7 +373,7 @@ func dash(s string) string {
 	return s
 }
 
-func sortedKeys(m map[string]int) []string {
+func sortedKeys[V any](m map[string]V) []string {
 	ks := make([]string, 0, len(m))
 	for k := range m {
 		ks = append(ks, k)
@@ -373,17 +402,32 @@ func (s *Stats) Markdown(w io.Writer, title string) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "## Source × host")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| source | host | candidates | kept | with context | with attachment | issue bodies | credential | short | non-English | near-dup |")
-	fmt.Fprintln(w, "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+	fmt.Fprintln(w, "| source | host | candidates | kept | human | agent | unknown | with context | with attachment | issue bodies | credential | short | non-English | near-dup |")
+	fmt.Fprintln(w, "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
 	var tc, tk int
+	ta := map[string]int{}
 	for _, r := range s.Rows {
-		fmt.Fprintf(w, "| %s | %s | %d | %d | %d | %d | %d | %d | %d | %d | %d |\n", r.Source, dash(r.Host), r.Candidates, r.Kept, r.WithContext, r.WithAttach, r.IssueBodies,
+		fmt.Fprintf(w, "| %s | %s | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d |\n", r.Source, dash(r.Host), r.Candidates, r.Kept,
+			r.ByAuthor[corpus.AuthorHuman], r.ByAuthor[corpus.AuthorAgent], r.ByAuthor[corpus.AuthorUnknown], r.WithContext, r.WithAttach, r.IssueBodies,
 			r.Dropped["credential"], r.Dropped["short"], r.Dropped["non-english"], r.Dropped["near-duplicate"])
 		tc += r.Candidates
 		tk += r.Kept
+		for k, v := range r.ByAuthor {
+			ta[k] += v
+		}
 	}
-	fmt.Fprintf(w, "| **total** | | %d | %d | | | | | | | |\n\n", tc, tk)
+	fmt.Fprintf(w, "| **total** | | %d | %d | %d | %d | %d | | | | | | | |\n\n", tc, tk, ta[corpus.AuthorHuman], ta[corpus.AuthorAgent], ta[corpus.AuthorUnknown])
 	fmt.Fprintf(w, "Split: calibration %d, test %d.\n\n", s.Splits["calibration"], s.Splits["test"])
+	fmt.Fprintln(w, "## Author kind by rule (kept records)")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "`author_kind` identifies agent-written requests; they are kept at full weight (PROJECT.md §5). Issue rule: `issue-footer` = generated-with footer, `issue-structure` = ≥2 `## ` headings and ≥400 chars (both → agent); `issue-no-rule` → unknown. Repo prompt files → agent; Claude Code typed/queued turns, chat-export turns and WildChat → human.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "| source | rule | records |\n|---|---|---:|")
+	for _, k := range sortedKeys(s.AuthorRules) {
+		src, rule, _ := strings.Cut(k, " ")
+		fmt.Fprintf(w, "| %s | %s | %d |\n", src, rule, s.AuthorRules[k])
+	}
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "## Credential drops by pattern")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Hard drop of the whole record. \"context-only\" means the match was in `context_text` (the preceding turns), which is also sent to models.")

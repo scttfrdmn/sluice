@@ -6,6 +6,7 @@ package report
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -30,6 +31,8 @@ type Inputs struct {
 	Split     string // calibration | test | all
 	Taxonomy  string
 	Iteration int // 0 for taxonomy v0, 1 after the one iteration
+	// Subsample, when set, is the E0 subsample Records was restricted to.
+	Subsample *corpus.Subsample
 }
 
 // Report is report.json.
@@ -40,10 +43,18 @@ type Report struct {
 	Models          []ModelInfo         `json:"models"`
 	Prices          config.Prices       `json:"prices"`
 	Delta           float64             `json:"delta"`
+	Subsample       *SubsampleInfo      `json:"subsample,omitempty"`
 	Corpus          []CorpusRow         `json:"corpus"`
+	CorpusByAuthor  []CorpusRow         `json:"corpus_by_author_kind"`
+	CorpusCross     []CorpusRow         `json:"corpus_by_source_author_kind"`
 	ClassHistogram  map[string]int      `json:"class_histogram"`
+	// ClassByGroup is leaves per class per breakdown group (source:*,
+	// author:*).
+	ClassByGroup map[string]map[string]int `json:"class_by_group"`
+	BreakdownCols []string                 `json:"breakdown_groups"`
 	Coverage        Coverage            `json:"coverage"`
 	Noise           []NoiseRow          `json:"noise"`
+	NoiseByGroup    []NoiseRow          `json:"noise_by_group"`
 	Classes         []ClassRow          `json:"classes"`
 	Groups          map[string]Headline `json:"groups"`
 	GroupOrder      []string            `json:"group_order"`
@@ -62,9 +73,20 @@ type ModelInfo struct {
 	InPerM, OutPerM          float64
 }
 
-// CorpusRow is one source in the corpus table.
+// SubsampleInfo summarizes the E0 subsample (ids are in subsample.json).
+type SubsampleInfo struct {
+	Seed       uint64         `json:"seed"`
+	PerStratum int            `json:"per_stratum"`
+	Split      string         `json:"split"`
+	Available  map[string]int `json:"available"`
+	Selected   map[string]int `json:"selected"`
+}
+
+// CorpusRow is one source (or author kind, or source × author kind) in the
+// corpus table.
 type CorpusRow struct {
 	Source         string  `json:"source"`
+	AuthorKind     string  `json:"author_kind,omitempty"`
 	Requests       int     `json:"requests"`
 	Tagged         int     `json:"tagged"`
 	TagFailed      int     `json:"tag_failed"`
@@ -85,7 +107,8 @@ type Coverage struct {
 	RefStatusCounts map[string]int `json:"ref_status_counts,omitempty"`
 }
 
-// NoiseRow is the per-class draw flip rate and judge disagreement.
+// NoiseRow is the draw flip rate and judge disagreement for one class (or,
+// in NoiseByGroup, one group).
 type NoiseRow struct {
 	Class         string  `json:"class"`
 	Pairs         int     `json:"pairs"`
@@ -160,48 +183,30 @@ func Build(in Inputs) (*Report, error) {
 	for _, r := range in.Records {
 		recByID[r.ID] = r
 	}
-	type agg struct {
-		req, tagged, failed, leaves, compound, standalone int
-	}
-	src := map[string]*agg{}
-	get := func(s string) *agg {
-		if src[s] == nil {
-			src[s] = &agg{}
-		}
-		return src[s]
-	}
-	for _, r := range in.Records {
-		get(r.Source).req++
+	if ss := in.Subsample; ss != nil {
+		rep.Subsample = &SubsampleInfo{ss.Seed, ss.PerStratum, ss.Split, ss.Available, ss.Selected}
 	}
 	for _, t := range in.Tags {
-		a := get(recByID[t.RequestID].Source)
-		rep.TaggerCostUSD += t.CostUSD
-		if t.Status != corpus.TagOK {
-			a.failed++
-			continue
-		}
-		a.tagged++
-		a.leaves += len(t.Leaves)
-		if len(t.Leaves) >= 2 {
-			a.compound++
-		}
-		if t.Standalone {
-			a.standalone++
+		if _, ok := recByID[t.RequestID]; ok {
+			rep.TaggerCostUSD += t.CostUSD
 		}
 	}
-	for _, s := range sortedKeys(src) {
-		a := src[s]
-		row := CorpusRow{Source: s, Requests: a.req, Tagged: a.tagged, TagFailed: a.failed, Leaves: a.leaves}
-		if a.tagged > 0 {
-			row.MeanLeaves = float64(a.leaves) / float64(a.tagged)
-			row.FracCompound = float64(a.compound) / float64(a.tagged)
-			row.FracStandalone = float64(a.standalone) / float64(a.tagged)
-		}
-		rep.Corpus = append(rep.Corpus, row)
-	}
+	rep.Corpus = corpusRows(in.Records, in.Tags, func(r corpus.Record) [2]string { return [2]string{r.Source, ""} })
+	rep.CorpusByAuthor = corpusRows(in.Records, in.Tags, func(r corpus.Record) [2]string { return [2]string{"", r.AuthorKind} })
+	rep.CorpusCross = corpusRows(in.Records, in.Tags, func(r corpus.Record) [2]string { return [2]string{r.Source, r.AuthorKind} })
+	rep.ClassByGroup = map[string]map[string]int{}
+	cols := map[string]bool{}
 	for _, l := range in.Leaves {
 		rep.ClassHistogram[l.Class]++
+		if rep.ClassByGroup[l.Class] == nil {
+			rep.ClassByGroup[l.Class] = map[string]int{}
+		}
+		for _, g := range breakdown(l) {
+			rep.ClassByGroup[l.Class][g]++
+			cols[g] = true
+		}
 	}
+	rep.BreakdownCols = orderGroups(cols)
 
 	// Labels by cell, cells by key.
 	labByKey := map[string]label.Label{}
@@ -218,19 +223,33 @@ func Build(in Inputs) (*Report, error) {
 	cov := Coverage{MethodCounts: map[string]int{}, RungCounts: map[int]int{}}
 	var items []Item
 	leafMeta := map[string]corpus.Leaf{}
-	noise := map[string]*struct{ pairs, flips, judged, disagree int }{}
+	type nzT struct{ pairs, flips, judged, disagree int }
+	noise := map[string]*nzT{}
+	gnoise := map[string]*nzT{}
 	for _, l := range in.Leaves {
 		if in.Split != "all" && l.Split != in.Split {
 			continue
 		}
 		cov.LeavesInSplit++
 		leafMeta[l.LeafID] = l
-		it := Item{LeafID: l.LeafID, RequestID: l.RequestID, Class: l.Class, Correct: make([]bool, k), Cost: make([]float64, k)}
+		it := Item{LeafID: l.LeafID, RequestID: l.RequestID, Class: l.Class, Source: l.Source, Correct: make([]bool, k), Cost: make([]float64, k)}
 		complete := true
-		nz := noise[l.Class]
-		if nz == nil {
-			nz = &struct{ pairs, flips, judged, disagree int }{}
-			noise[l.Class] = nz
+		// Noise accumulates per class and per breakdown group.
+		var nzs []*nzT
+		for _, key := range append([]string{"class:" + l.Class, "pooled"}, breakdown(l)...) {
+			m, name := gnoise, key
+			if c, ok := strings.CutPrefix(key, "class:"); ok {
+				m, name = noise, c
+			}
+			if m[name] == nil {
+				m[name] = &nzT{}
+			}
+			nzs = append(nzs, m[name])
+		}
+		bump := func(f func(*nzT)) {
+			for _, nz := range nzs {
+				f(nz)
+			}
 		}
 		for m, name := range models {
 			var draws [2]*bool
@@ -253,18 +272,24 @@ func Build(in Inputs) (*Report, error) {
 				cov.MethodCounts[lab.Method]++
 				cov.RungCounts[lab.Rung]++
 				if lab.JudgeAgreement != nil {
-					nz.judged++
-					if !*lab.JudgeAgreement {
-						nz.disagree++
-					}
+					agree := *lab.JudgeAgreement
+					bump(func(nz *nzT) {
+						nz.judged++
+						if !agree {
+							nz.disagree++
+						}
+					})
 				}
 				draws[d] = lab.Correct
 			}
 			if draws[0] != nil && draws[1] != nil {
-				nz.pairs++
-				if *draws[0] != *draws[1] {
-					nz.flips++
-				}
+				flip := *draws[0] != *draws[1]
+				bump(func(nz *nzT) {
+					nz.pairs++
+					if flip {
+						nz.flips++
+					}
+				})
 				it.Correct[m] = *draws[0] && *draws[1]
 			}
 			it.Cost[m] = cost
@@ -275,16 +300,25 @@ func Build(in Inputs) (*Report, error) {
 	}
 	cov.LeavesComplete = len(items)
 	rep.Coverage = cov
-	for _, c := range sortedKeys(noise) {
-		nz := noise[c]
-		row := NoiseRow{Class: c, Pairs: nz.pairs, JudgedCells: nz.judged}
+	noiseRow := func(name string, nz *nzT) NoiseRow {
+		row := NoiseRow{Class: name, Pairs: nz.pairs, JudgedCells: nz.judged}
 		if nz.pairs > 0 {
 			row.FlipRate = float64(nz.flips) / float64(nz.pairs)
 		}
 		if nz.judged > 0 {
 			row.JudgeDisagree = float64(nz.disagree) / float64(nz.judged)
 		}
-		rep.Noise = append(rep.Noise, row)
+		return row
+	}
+	for _, c := range sortedKeys(noise) {
+		rep.Noise = append(rep.Noise, noiseRow(c, noise[c]))
+	}
+	gset := map[string]bool{}
+	for g := range gnoise {
+		gset[g] = true
+	}
+	for _, g := range orderGroups(gset) {
+		rep.NoiseByGroup = append(rep.NoiseByGroup, noiseRow(g, gnoise[g]))
 	}
 
 	// Groups.
@@ -298,11 +332,17 @@ func Build(in Inputs) (*Report, error) {
 		{"standalone", func(l corpus.Leaf) bool { return l.Standalone }},
 		{"context-dependent", func(l corpus.Leaf) bool { return !l.Standalone }},
 	}
-	for _, s := range []string{corpus.SourceClaudeCode, corpus.SourceClaudeExport, corpus.SourceChatGPT, corpus.SourceRepos} {
+	for _, s := range sourceOrder {
 		groups = append(groups, struct {
 			name string
 			keep func(corpus.Leaf) bool
 		}{"source:" + s, func(l corpus.Leaf) bool { return l.Source == s }})
+	}
+	for _, a := range corpus.AuthorKinds {
+		groups = append(groups, struct {
+			name string
+			keep func(corpus.Leaf) bool
+		}{"author:" + a, func(l corpus.Leaf) bool { return l.AuthorKind == a }})
 	}
 	for gi, g := range groups {
 		var sub []Item
@@ -316,6 +356,12 @@ func Build(in Inputs) (*Report, error) {
 		}
 		rep.Groups[g.name] = Compute(sub, models, cfg.Report.Delta, cfg.Report.Bootstrap, cfg.Seeds.Bootstrap+uint64(gi))
 		rep.GroupOrder = append(rep.GroupOrder, g.name)
+		if gi == 0 {
+			// Equal weight per source next to the natural-weight pooled
+			// number, so a dominant source's share is visible.
+			rep.Groups[BalancedGroup] = ComputeBalanced(sub, models, cfg.Report.Bootstrap, cfg.Seeds.Bootstrap+1000)
+			rep.GroupOrder = append(rep.GroupOrder, BalancedGroup)
+		}
 	}
 
 	// Per class.
@@ -439,6 +485,113 @@ func Build(in Inputs) (*Report, error) {
 	rep.Policy = pol
 	rep.Decision = decisionLine(rep, cfg.Report.RhoProceed)
 	return rep, nil
+}
+
+// BalancedGroup is the source-balanced pooled headline.
+const BalancedGroup = "pooled (source-balanced)"
+
+// sourceOrder is the report order of sources.
+var sourceOrder = []string{corpus.SourceClaudeCode, corpus.SourceClaudeExport, corpus.SourceChatGPT, corpus.SourceRepos, corpus.SourceWildchat}
+
+// breakdown is the source and author-kind groups a leaf belongs to.
+func breakdown(l corpus.Leaf) []string {
+	return []string{"source:" + l.Source, "author:" + l.AuthorKind}
+}
+
+// orderGroups orders group names: pooled, sources in sourceOrder, author
+// kinds in corpus.AuthorKinds, then anything else sorted.
+func orderGroups(set map[string]bool) []string {
+	var out []string
+	add := func(g string) {
+		if set[g] {
+			out = append(out, g)
+			delete(set, g)
+		}
+	}
+	add("pooled")
+	for _, s := range sourceOrder {
+		add("source:" + s)
+	}
+	for _, a := range corpus.AuthorKinds {
+		add("author:" + a)
+	}
+	rest := make([]string, 0, len(set))
+	for g := range set {
+		rest = append(rest, g)
+	}
+	sort.Strings(rest)
+	return append(out, rest...)
+}
+
+// corpusRows aggregates records and their tag results by key (source,
+// author kind).
+func corpusRows(recs []corpus.Record, tags []corpus.TagResult, key func(corpus.Record) [2]string) []CorpusRow {
+	type agg struct {
+		req, tagged, failed, leaves, compound, standalone int
+	}
+	recByID := map[string]corpus.Record{}
+	by := map[[2]string]*agg{}
+	get := func(k [2]string) *agg {
+		if by[k] == nil {
+			by[k] = &agg{}
+		}
+		return by[k]
+	}
+	for _, r := range recs {
+		recByID[r.ID] = r
+		get(key(r)).req++
+	}
+	for _, t := range tags {
+		r, ok := recByID[t.RequestID]
+		if !ok {
+			continue
+		}
+		a := get(key(r))
+		if t.Status != corpus.TagOK {
+			a.failed++
+			continue
+		}
+		a.tagged++
+		a.leaves += len(t.Leaves)
+		if len(t.Leaves) >= 2 {
+			a.compound++
+		}
+		if t.Standalone {
+			a.standalone++
+		}
+	}
+	keys := make([][2]string, 0, len(by))
+	for k := range by {
+		keys = append(keys, k)
+	}
+	rank := func(k [2]string) (int, int) {
+		si := slices.Index(sourceOrder, k[0])
+		ai := slices.Index(corpus.AuthorKinds, k[1])
+		return si, ai
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		si, ai := rank(keys[i])
+		sj, aj := rank(keys[j])
+		if si != sj {
+			return si < sj
+		}
+		if ai != aj {
+			return ai < aj
+		}
+		return keys[i][0]+keys[i][1] < keys[j][0]+keys[j][1]
+	})
+	var out []CorpusRow
+	for _, k := range keys {
+		a := by[k]
+		row := CorpusRow{Source: k[0], AuthorKind: k[1], Requests: a.req, Tagged: a.tagged, TagFailed: a.failed, Leaves: a.leaves}
+		if a.tagged > 0 {
+			row.MeanLeaves = float64(a.leaves) / float64(a.tagged)
+			row.FracCompound = float64(a.compound) / float64(a.tagged)
+			row.FracStandalone = float64(a.standalone) / float64(a.tagged)
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 func rungSummary(m map[int]int) string {

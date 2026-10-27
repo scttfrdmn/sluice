@@ -80,6 +80,8 @@ func harvestClaudeExport(path string, contextChars int, st *Stats) ([]corpus.Rec
 			}
 			out = append(out, corpus.Record{
 				Source:        src,
+				AuthorKind:    corpus.AuthorHuman,
+				AuthorRule:    corpus.RuleChatExport,
 				OriginRef:     fmt.Sprintf("claude-export:%s:%s", c.UUID, m.UUID),
 				Timestamp:     m.CreatedAt,
 				Text:          text,
@@ -201,6 +203,8 @@ func harvestChatGPT(path string, contextChars int, st *Stats) ([]corpus.Record, 
 			}
 			out = append(out, corpus.Record{
 				Source:        src,
+				AuthorKind:    corpus.AuthorHuman,
+				AuthorRule:    corpus.RuleChatExport,
 				OriginRef:     fmt.Sprintf("chatgpt:%s:%s", id, m.ID),
 				Timestamp:     ts,
 				Text:          text,
