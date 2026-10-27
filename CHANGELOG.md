@@ -12,6 +12,7 @@ semantic versioning on the 0.x series.
 - `estimate`: projected E0 spend by model and stage from the price table and the subsample's token statistics.
 - Report: every table broken out by source and by `author_kind`; a source-balanced pooled ρ next to the natural-weight one; noise by group; class histogram by group.
 - `runs/<id>/repo_prompt_files.txt`: every matched repo prompt file and its outcome.
+- ChatGPT export: `-chatgpt-export` and `probe chatgpt-export` accept a directory of per-conversation JSON files as well as `conversations.json`. Observed schema in `docs/SCHEMAS.md`.
 
 ### Changed
 - Repo prompt files match case-insensitive globs (`*kickoff*prompt*.md`, `*CLAUDE_CODE_PROMPT*.md`, `*PROMPT*.md`, `*_prompt.md`, `*.prompt.md`) plus `PROJECT.md`, excluding `README*`, `CHANGELOG*`, `LICENSE*`.

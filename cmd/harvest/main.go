@@ -67,7 +67,7 @@ func run() error {
 		runID        = flag.String("run", "", "run id (required)")
 		claudeCode   = flag.String("claude-code", "", "Claude Code logs root (<host>/projects/...)")
 		claudeExport = flag.String("claude-export", "", "claude.ai conversations.json")
-		chatgpt      = flag.String("chatgpt-export", "", "ChatGPT conversations.json")
+		chatgpt      = flag.String("chatgpt-export", "", "ChatGPT conversations.json, or a directory of per-conversation .json files")
 		repos        = flag.String("repos", "", "repos root (e.g. ~/src)")
 		owner        = flag.String("owner", "", "GitHub login whose issues are kept (default: config harvest.owner)")
 		issues       = flag.Bool("issues", true, "query GitHub issues with gh when -repos is set")

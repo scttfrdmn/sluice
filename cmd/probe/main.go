@@ -6,7 +6,7 @@
 //
 //	probe claude-code <dir>        distinct keys and type values, first 200 lines of 20 files
 //	probe claude-export <file>     conversation and chat_message keys, sender values
-//	probe chatgpt-export <file>    conversation, node, message keys, roles, part types
+//	probe chatgpt-export <file|dir> conversation, node, message keys, roles, part types
 //
 // Output is key names, value kinds and counts only; no message text is
 // printed, so the output is safe to paste into docs/SCHEMAS.md.
@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/scttfrdmn/sluice/internal/harvest"
 )
 
 func main() {
@@ -250,7 +252,7 @@ func probeClaudeExport(path string) error {
 }
 
 func probeChatGPT(path string) error {
-	convs, err := readJSONArray(path)
+	convs, err := harvest.ReadConversations[map[string]any](path)
 	if err != nil {
 		return err
 	}

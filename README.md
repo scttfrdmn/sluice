@@ -36,7 +36,7 @@ Bedrock backend:
 ```sh
 bin/harvest -run r1 -claude-code corpus/raw/claude-code \
   -claude-export corpus/raw/claude-export/conversations.json \
-  -chatgpt-export corpus/raw/chatgpt-export/conversations.json \
+  -chatgpt-export corpus/raw/chatgpt-export \
   -repos ~/src -wildchat 3000
 bin/tag -run r1 && bin/matrix -run r1 && bin/label -run r1 && bin/report -run r1
 ```

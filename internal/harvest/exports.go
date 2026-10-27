@@ -127,13 +127,9 @@ type gptNode struct {
 }
 
 func harvestChatGPT(path string, contextChars int, st *Stats) ([]corpus.Record, error) {
-	b, err := os.ReadFile(path)
+	convs, err := ReadConversations[gptConv](path)
 	if err != nil {
 		return nil, err
-	}
-	var convs []gptConv
-	if err := json.Unmarshal(b, &convs); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	src := corpus.SourceChatGPT
 	var out []corpus.Record

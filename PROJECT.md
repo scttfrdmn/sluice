@@ -87,7 +87,7 @@ Raw inputs live under `corpus/raw/` in the repo, gitignored (personal traffic ne
 
 ```
 corpus/raw/claude-export/conversations.json
-corpus/raw/chatgpt-export/conversations.json
+corpus/raw/chatgpt-export/conversations.json  (or json/<title>_<id>.json, one per conversation)
 corpus/raw/claude-code/<host>/projects/...     one subtree per machine, rsynced
 corpus/raw/wildchat/sample.jsonl
 ```

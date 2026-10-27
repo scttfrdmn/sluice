@@ -37,34 +37,34 @@ type Inputs struct {
 
 // Report is report.json.
 type Report struct {
-	RunSplit        string              `json:"split"`
-	TaxonomyVersion string              `json:"taxonomy_version"`
-	Iteration       int                 `json:"taxonomy_iteration"`
-	Models          []ModelInfo         `json:"models"`
-	Prices          config.Prices       `json:"prices"`
-	Delta           float64             `json:"delta"`
-	Subsample       *SubsampleInfo      `json:"subsample,omitempty"`
-	Corpus          []CorpusRow         `json:"corpus"`
-	CorpusByAuthor  []CorpusRow         `json:"corpus_by_author_kind"`
-	CorpusCross     []CorpusRow         `json:"corpus_by_source_author_kind"`
-	ClassHistogram  map[string]int      `json:"class_histogram"`
+	RunSplit        string         `json:"split"`
+	TaxonomyVersion string         `json:"taxonomy_version"`
+	Iteration       int            `json:"taxonomy_iteration"`
+	Models          []ModelInfo    `json:"models"`
+	Prices          config.Prices  `json:"prices"`
+	Delta           float64        `json:"delta"`
+	Subsample       *SubsampleInfo `json:"subsample,omitempty"`
+	Corpus          []CorpusRow    `json:"corpus"`
+	CorpusByAuthor  []CorpusRow    `json:"corpus_by_author_kind"`
+	CorpusCross     []CorpusRow    `json:"corpus_by_source_author_kind"`
+	ClassHistogram  map[string]int `json:"class_histogram"`
 	// ClassByGroup is leaves per class per breakdown group (source:*,
 	// author:*).
-	ClassByGroup map[string]map[string]int `json:"class_by_group"`
-	BreakdownCols []string                 `json:"breakdown_groups"`
-	Coverage        Coverage            `json:"coverage"`
-	Noise           []NoiseRow          `json:"noise"`
-	NoiseByGroup    []NoiseRow          `json:"noise_by_group"`
-	Classes         []ClassRow          `json:"classes"`
-	Groups          map[string]Headline `json:"groups"`
-	GroupOrder      []string            `json:"group_order"`
-	CostLatency     []ModelCost         `json:"cost_latency"`
-	Policy          PolicyCost          `json:"policy_cost"`
-	TaggerCostUSD   float64             `json:"tagger_cost_usd"`
-	LabelCostUSD    float64             `json:"label_cost_usd"`
-	Decision        string              `json:"decision"`
-	DecisionRule    string              `json:"decision_rule"`
-	ClassRho        map[string]*float64 `json:"class_rho"`
+	ClassByGroup  map[string]map[string]int `json:"class_by_group"`
+	BreakdownCols []string                  `json:"breakdown_groups"`
+	Coverage      Coverage                  `json:"coverage"`
+	Noise         []NoiseRow                `json:"noise"`
+	NoiseByGroup  []NoiseRow                `json:"noise_by_group"`
+	Classes       []ClassRow                `json:"classes"`
+	Groups        map[string]Headline       `json:"groups"`
+	GroupOrder    []string                  `json:"group_order"`
+	CostLatency   []ModelCost               `json:"cost_latency"`
+	Policy        PolicyCost                `json:"policy_cost"`
+	TaggerCostUSD float64                   `json:"tagger_cost_usd"`
+	LabelCostUSD  float64                   `json:"label_cost_usd"`
+	Decision      string                    `json:"decision"`
+	DecisionRule  string                    `json:"decision_rule"`
+	ClassRho      map[string]*float64       `json:"class_rho"`
 }
 
 // ModelInfo is one pool entry as printed.

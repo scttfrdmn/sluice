@@ -64,15 +64,32 @@ It will be checked against `probe claude-export` before use.
 
 ## ChatGPT export
 
-`corpus/raw/chatgpt-export/conversations.json`. **Not yet probed: no
-export is present yet.** The extractor assumes the PROJECT.md §5 structure
-(array of conversations with `mapping`, `current_node`, `conversation_id`;
-nodes with `parent` and `message.author.role`, `message.content.content_type`,
-`message.content.parts[]`, `message.create_time`, `message.metadata`). It
-walks `parent` from `current_node`, keeps `user` messages with
-`content_type` `text` / `multimodal_text` and string parts, and skips
-messages flagged `is_visually_hidden_from_conversation`. It will be checked
-against `probe chatgpt-export` before use.
+Probed 2026-10-27 (`probe chatgpt-export corpus/raw/chatgpt-export`) on 147
+conversations. The export did not come as the official zip with one
+`conversations.json`. It is a per-conversation exporter's zip with `json/`,
+`markdown/`, `html/` and `files/` (attachments) folders, one
+`<title>_<id>.json` per conversation. Only `json/` is extracted, to
+`corpus/raw/chatgpt-export/json/`. Each file is one conversation object in
+OpenAI's native shape. The harvester and the probe accept either form: a
+`conversations.json` array, or a directory walked for `*.json`, where each
+file holds an object or an array.
+
+| field | type | observed | used as |
+|---|---|---|---|
+| `conversation_id` | string | all | origin_ref, session_id |
+| `current_node` | string | all | start of the `parent` walk |
+| `mapping` | object | all | nodes `{id, parent, children[], message}`; the root node has `message: null` |
+| `message.id` | string | all | origin_ref |
+| `message.author.role` | string | `assistant` 5,398, `tool` 4,164, `user` 1,728 | keep `user` |
+| `message.content.content_type` | string | user: `text` 1,648, `multimodal_text` 80 | keep `text`, `multimodal_text` |
+| `message.content.parts[]` | string or object | user: 1,728 strings, 97 objects (`image_asset_pointer`) | strings joined; objects set has_attachment |
+| `message.create_time` | number or null | 11,008 / 282 null | timestamp |
+| `message.metadata.is_visually_hidden_from_conversation` | bool | absent on all user messages | skip if true |
+
+Assistant content types seen: `text` (used for context), `code`, `thoughts`,
+`reasoning_recap` (not used). 20 of 1,728 user messages are on edited-away
+branches, off the `current_node` path, and are not harvested. Two
+conversations use a custom GPT (`gizmo_id` set) and are kept.
 
 ## WildChat (public control)
 

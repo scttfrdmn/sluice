@@ -60,7 +60,7 @@ pull-sessions: build
 probes: build
 	$(BIN)/probe claude-code corpus/raw/claude-code
 	@test -f corpus/raw/claude-export/conversations.json && $(BIN)/probe claude-export corpus/raw/claude-export/conversations.json || echo "probe: no claude.ai export at corpus/raw/claude-export/conversations.json"
-	@test -f corpus/raw/chatgpt-export/conversations.json && $(BIN)/probe chatgpt-export corpus/raw/chatgpt-export/conversations.json || echo "probe: no ChatGPT export at corpus/raw/chatgpt-export/conversations.json"
+	@test -e corpus/raw/chatgpt-export && $(BIN)/probe chatgpt-export corpus/raw/chatgpt-export || echo "probe: no ChatGPT export under corpus/raw/chatgpt-export/"
 
 clean:
 	rm -rf $(BIN)

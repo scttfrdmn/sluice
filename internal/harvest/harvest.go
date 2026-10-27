@@ -51,13 +51,13 @@ type Row struct {
 	Kept       int `json:"kept"`
 	// Of the kept records: with non-empty context_text, with attachments,
 	// and (repos only) issue bodies as opposed to prompt files.
-	WithContext int            `json:"with_context"`
-	WithAttach  int            `json:"with_attachment"`
-	IssueBodies int            `json:"issue_bodies"`
+	WithContext int `json:"with_context"`
+	WithAttach  int `json:"with_attachment"`
+	IssueBodies int `json:"issue_bodies"`
 	// ByAuthor counts kept records by author_kind.
 	ByAuthor map[string]int `json:"by_author_kind"`
-	Skipped     map[string]int `json:"skipped,omitempty"`
-	Dropped     map[string]int `json:"dropped,omitempty"`
+	Skipped  map[string]int `json:"skipped,omitempty"`
+	Dropped  map[string]int `json:"dropped,omitempty"`
 }
 
 // Stats is the aggregate harvest table. It contains counts only and is
