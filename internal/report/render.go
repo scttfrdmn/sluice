@@ -70,6 +70,18 @@ func (r *Report) Markdown(w io.Writer) {
 		}
 		p("\n")
 	}
+	p("\nClass × source × author_kind (leaves, n only). Per-class accuracy below is pooled: at this scale a class × source × model cell is too thin to certify, and this table shows how thin.\n\n| class |")
+	for _, col := range r.ClassCrossCols {
+		p(" %s |", col)
+	}
+	p("\n|---|%s\n", strings.Repeat("---:|", len(r.ClassCrossCols)))
+	for _, h := range hist {
+		p("| %s |", h.k)
+		for _, col := range r.ClassCrossCols {
+			p(" %d |", r.ClassCross[h.k][col])
+		}
+		p("\n")
+	}
 	c := r.Coverage
 	p("\nCoverage (split %s): %d leaves, %d with all cells labeled; %d missing cells, %d unlabeled cells.\n", r.RunSplit, c.LeavesInSplit, c.LeavesComplete, c.MissingCells, c.UnlabeledCells)
 	p("Label methods: %s. Rungs: %s.\n", fmtCounts(c.MethodCounts), fmtIntCounts(c.RungCounts))

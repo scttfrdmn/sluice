@@ -10,8 +10,9 @@ RUNS    ?= runs
 E0_CONFIG := testdata/sluice.test.yaml
 E0_RUN    := e0-testdata
 E0_RAW    := testdata/raw
+E0_CAP    := -max-spend 1000
 
-.PHONY: all build test vet e0 pull-sessions probes clean
+.PHONY: all build test vet e0 pull-sessions probes open-test clean
 
 all: build
 
@@ -38,19 +39,31 @@ e0: build
 		-wildchat 4 -wildchat-file $(E0_RAW)/wildchat/sample.jsonl \
 		-review $(RUNS)/$(E0_RUN)/review
 	$(BIN)/harvest subsample -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN)
-	$(BIN)/tag    -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN)
-	$(BIN)/matrix -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN)
-	$(BIN)/label  -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN)
+	$(BIN)/tag    -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN) $(E0_CAP)
+	$(BIN)/matrix -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN) $(E0_CAP)
+	$(BIN)/label  -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN) $(E0_CAP)
 	$(BIN)/report -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN) -split all
 	@echo "--- second pass (must be a no-op) ---"
-	$(BIN)/tag    -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN)
-	$(BIN)/matrix -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN) | tee $(RUNS)/$(E0_RUN)/second-pass.txt
+	$(BIN)/tag    -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN) $(E0_CAP)
+	$(BIN)/matrix -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN) $(E0_CAP) | tee $(RUNS)/$(E0_RUN)/second-pass.txt
 	@grep -q " 0 pending" $(RUNS)/$(E0_RUN)/second-pass.txt || (echo "e0: matrix resume was not a no-op" && exit 1)
-	$(BIN)/label  -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN) | tee -a $(RUNS)/$(E0_RUN)/second-pass.txt
+	$(BIN)/label  -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN) $(E0_CAP) | tee -a $(RUNS)/$(E0_RUN)/second-pass.txt
 	@grep -q " 0 new labels" $(RUNS)/$(E0_RUN)/second-pass.txt || (echo "e0: label resume was not a no-op" && exit 1)
 	$(BIN)/report -config $(E0_CONFIG) -runs $(RUNS) -run $(E0_RUN) -split all
 	@test -s $(RUNS)/$(E0_RUN)/report.all.md && test -s $(RUNS)/$(E0_RUN)/accuracy_cost.all.png
 	@echo "e0: OK ($(RUNS)/$(E0_RUN)/report.all.md)"
+
+# Open the test split once the calibration result warrants it: tag the
+# matching test subsample (subsample_test.json), run and label its matrix,
+# and write the one-time test report. Each stage needs its own cap, set on
+# the spend-approval issue:
+#   make open-test RUN=r2 TAG_CAP=.. MATRIX_CAP=.. LABEL_CAP=..
+open-test: build
+	@test -n "$(RUN)" -a -n "$(TAG_CAP)" -a -n "$(MATRIX_CAP)" -a -n "$(LABEL_CAP)" || (echo "open-test: set RUN, TAG_CAP, MATRIX_CAP, LABEL_CAP" && exit 1)
+	$(BIN)/tag    -config $(CONFIG) -runs $(RUNS) -run $(RUN) -subsample test -max-spend $(TAG_CAP)
+	$(BIN)/matrix -config $(CONFIG) -runs $(RUNS) -run $(RUN) -split test -max-spend $(MATRIX_CAP)
+	$(BIN)/label  -config $(CONFIG) -runs $(RUNS) -run $(RUN) -split test -max-spend $(LABEL_CAP)
+	$(BIN)/report -config $(CONFIG) -runs $(RUNS) -run $(RUN) -split test
 
 # Copy Claude Code session logs from every configured host.
 pull-sessions: build

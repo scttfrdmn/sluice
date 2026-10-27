@@ -135,6 +135,10 @@ type Harvest struct {
 	DropSampleSize int      `yaml:"drop_sample_size"`
 	Owner          string   `yaml:"owner"`
 	ExcludeRepos   []string `yaml:"exclude_repos"`
+	// PromptFileOwners are the GitHub owners whose repos contribute prompt
+	// files; repos with no remote also contribute. Others are excluded and
+	// listed in repo_prompt_files.txt.
+	PromptFileOwners []string `yaml:"prompt_file_owners"`
 	// WildchatOversample is the factor by which the Python helper
 	// oversamples, so that N records survive the Go-side filters.
 	WildchatOversample float64 `yaml:"wildchat_oversample"`

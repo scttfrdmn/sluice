@@ -201,3 +201,28 @@ func TestIssueAuthor(t *testing.T) {
 		}
 	}
 }
+
+func TestPromptExclusion(t *testing.T) {
+	root := "/src"
+	owners := map[string]string{
+		"/src/mine":       "scttfrdmn",
+		"/src/mine/third": "someoneelse",
+		"/src/local":      "",
+		"/src/fork":       "lgazo",
+	}
+	allowed := []string{"scttfrdmn", "trnsci"}
+	cases := map[string]string{
+		"mine/X_PROMPT.md":                   "",
+		"mine/third/docs/prompt.md":          "excluded:remote-owner someoneelse",
+		"local/a_prompt.md":                  "",
+		"fork/PROMPTS.md":                    "excluded:remote-owner lgazo",
+		"norepo/kickoff prompt.md":           "",
+		"mine/.hermit/x/default-prompt.md":   "excluded:vendored-dir .hermit",
+		"mine/vendor/github.com/y/PROMPT.md": "excluded:vendored-dir vendor",
+	}
+	for rel, want := range cases {
+		if got := promptExclusion(root, rel, owners, allowed); got != want {
+			t.Errorf("%s: %q, want %q", rel, got, want)
+		}
+	}
+}

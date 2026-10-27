@@ -15,6 +15,7 @@ import (
 	"github.com/scttfrdmn/sluice/internal/config"
 	"github.com/scttfrdmn/sluice/internal/corpus"
 	"github.com/scttfrdmn/sluice/internal/llm"
+	"github.com/scttfrdmn/sluice/internal/spend"
 )
 
 // Reclassifier assigns new-taxonomy classes to existing leaves without
@@ -27,6 +28,8 @@ type Reclassifier struct {
 	cache   *cache.Cache
 	tmpl    *template.Template
 	tmplSrc string
+	// Spend, if set, receives the measured cost of every model call.
+	Spend *spend.Budget
 }
 
 // NewReclassifier loads the reclass prompt template.
@@ -65,6 +68,10 @@ func (rc *Reclassifier) Reclass(ctx context.Context, l corpus.Leaf) (corpus.Leaf
 			resp, err := rc.client.Invoke(ctx, rc.model, llm.Request{Purpose: llm.PurposeReclass, Prompt: prompt, MaxTokens: 200, Meta: map[string]string{"text": l.SpanText}})
 			if err != nil {
 				return l, false, err
+			}
+			if rc.Spend != nil {
+				c, _ := rc.model.Cost(resp.TokensIn, resp.TokensOut, false)
+				rc.Spend.Add(c)
 			}
 			var o struct {
 				Operation    string `json:"operation"`

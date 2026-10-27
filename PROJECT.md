@@ -93,7 +93,7 @@ corpus/raw/wildchat/sample.jsonl
 ```
 
 Claude Code logs from other machines are rsynced into `corpus/raw/claude-code/<host>/` by `make pull-sessions` (hosts in config: at least the local machine, `juno.local`, `castor.local`); the harvester records `host` in `origin_ref` and reports per-host counts.
-3. **Repo prompts.** Walk `~/src/*`: `PROJECT.md`, and files matching (case-insensitive) `*kickoff*prompt*.md`, `*CLAUDE_CODE_PROMPT*.md`, `*PROMPT*.md`, `*_prompt.md`, `*.prompt.md` — excluding `README*`, `CHANGELOG*`, `LICENSE*` and anything under `node_modules`, `vendor`, `.git`; plus GitHub issue bodies authored by the owner (via `gh issue list --json body,author`). These are compound by construction. The harvest writes the matched file list with each file's outcome to `runs/<id>/repo_prompt_files.txt`.
+3. **Repo prompts.** Walk `~/src/*`: `PROJECT.md`, and files matching (case-insensitive) `*kickoff*prompt*.md`, `*CLAUDE_CODE_PROMPT*.md`, `*PROMPT*.md`, `*_prompt.md`, `*.prompt.md` — excluding `README*`, `CHANGELOG*`, `LICENSE*` and anything under `node_modules` or `.git`. Prompt files are taken only from repos whose remote owner is `scttfrdmn`, `playgroundlogic`, `provabl` or `trnsci`, or that have no remote, judged by the nearest enclosing git repository, so a third-party clone nested in an owner directory is excluded; matches under `vendor/` or `.hermit/` are excluded too. Plus GitHub issue bodies authored by the owner (via `gh issue list --json body,author`). These are compound by construction. The harvest writes every matched file, with its outcome (kept, dropped by a filter, or excluded and why), to `runs/<id>/repo_prompt_files.txt`, so the exclusions are visible.
 4. **Public control.** WildChat-1M, English, first user turn only, uniform sample of 3,000. Controls for the owner's traffic being unrepresentative.
 
 Record schema:
@@ -109,7 +109,9 @@ id, source, origin_ref, timestamp, author_kind, author_rule, text, context_text,
 
 Every E0 number is reported by `author_kind` and by source as well as pooled. Next to the natural-weight pooled ρ the report gives a source-balanced pooled ρ (equal total weight per source), so a dominant source's share is visible rather than hidden.
 
-**E0 subsample.** E0 does not run the full corpus. `harvest subsample` draws a seeded, stratified subsample of the calibration split: 1,000 requests per stratum (Claude Code, GitHub issues, WildChat, each chat export once present; repo prompt files are their own stratum and are all taken, being few). The ids, seed and per-stratum counts are written to `runs/<id>/subsample.json`; `tag`, and through it `matrix`, `label` and `report`, restrict to it. The full corpus is reserved for E1 tagger training and E2.
+**E0 subsample.** E0 does not run the full corpus. `harvest subsample` draws a seeded, stratified subsample of the calibration split: 1,000 requests per stratum (Claude Code, GitHub issues, WildChat, each chat export once present; repo prompt files are their own stratum and are all taken, being few). The ids, seed and per-stratum counts are written to `runs/<id>/subsample.json`; `tag`, and through it `matrix`, `label` and `report`, restrict to it. The full corpus is reserved for E1 tagger training and E2. The matching test-split draw (same seed scheme, same 1,000 per stratum) is written at the same time to `runs/<id>/subsample_test.json` and is not tagged or run. The test split stays closed until the calibration result warrants opening it; opening it is one command (`make open-test`), with its spend budgeted separately at that point.
+
+Per-class accuracy tables are pooled: at 1,000 per source, a class × source × model cell is too thin to certify. The report adds a class × source × `author_kind` count table (n only) so the sparsity is visible. Cost and latency are reported per model, pooled; they are properties of the model.
 
 **Context-dependent requests.** Many turns in session logs assume prior context ("fix that", "now the tests"). Sent bare, they score as uniform failures and shrink ρ artificially. Handling:
 - `context_text` = the preceding user turn plus the preceding assistant turn's text blocks only (no tool results), truncated to 2,000 tokens, oldest first. First turns have empty context.
@@ -160,6 +162,8 @@ Budget estimate: 6,000 requests × ~2.2 leaves × 6 models × 2 draws ≈ 160k c
 - Decisions are recorded as GitHub issue comments on scttfrdmn/sluice, not in a local markdown file. `docs/SCHEMAS.md` and `docs/CORPUS.md` are reference documents and stay in the repo.
 - Repo is public, like the rest of scttfrdmn/*; the corpus never enters it.
 - The tagger returns quoted span text, not character offsets; the harness locates the text in the request and fails the tag if it is absent.
+- **Spend control.** Every stage that calls a model (`tag`, `matrix`, `label`) requires `-max-spend <usd>` and will not start without it. Cost accumulates from measured token counts and the price table as calls complete, cumulative with the stage's earlier passes over the same leaves; the stage halts cleanly (resumable) when the running total crosses the cap and prints the total. Batch jobs reserve their worst case (prompt plus `max_tokens` of output) before submission, so a batch job never takes the stage past the cap. Scott sets the cap per stage on the spend-approval issue (#7); nothing runs without it.
+- **Order of operations for E0 spend.** Once the caps are set: the tag pass on the calibration subsample first; then re-run `estimate`, which now uses measured leaves per request and leaf token lengths, post the revised projection on #7, and stop. Matrix and label run only after that revision is approved.
 
 ## 8. Related internal work
 

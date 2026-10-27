@@ -26,7 +26,11 @@ import (
 // directory of the repos root, plus owner-authored GitHub issue bodies.
 // These are compound by construction (PROJECT.md §5).
 
-var skipDirs = map[string]bool{".git": true, "node_modules": true, "vendor": true, ".venv": true, "venv": true, "target": true, "dist": true, "build": true, "__pycache__": true, ".terraform": true}
+var skipDirs = map[string]bool{".git": true, "node_modules": true, ".venv": true, "venv": true, "target": true, "dist": true, "build": true, "__pycache__": true, ".terraform": true}
+
+// vendoredDirs hold third-party code. They are walked so that prompt-file
+// matches inside them are listed as excluded, but nothing in them is kept.
+var vendoredDirs = map[string]bool{"vendor": true, ".hermit": true}
 
 // promptGlobs match file basenames case-insensitively. *prompt*.md already
 // covers the others; they are listed so the intent stays visible.
@@ -78,6 +82,27 @@ type ReposOptions struct {
 	Owner   string
 	Exclude []string
 	Issues  bool // query GitHub issues with gh
+	// PromptOwners are the remote owners whose prompt files are kept
+	// (plus repos with no remote). Empty keeps every owner.
+	PromptOwners []string
+}
+
+// remoteOwner returns the GitHub owner of dir's origin remote, "" if dir is
+// a git repository without a GitHub origin, and ok false if dir is not a
+// git repository.
+func remoteOwner(ctx context.Context, dir string) (owner string, ok bool) {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return "", false
+	}
+	b, err := exec.CommandContext(ctx, "git", "-C", dir, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return "", true
+	}
+	m := reGitHubRemote.FindStringSubmatch(strings.TrimSpace(string(b)))
+	if m == nil {
+		return "", true
+	}
+	return m[1], true
 }
 
 func harvestRepos(ctx context.Context, o ReposOptions, st *Stats) ([]corpus.Record, error) {
@@ -97,6 +122,9 @@ func harvestRepos(ctx context.Context, o ReposOptions, st *Stats) ([]corpus.Reco
 			continue
 		}
 		repoDir := filepath.Join(o.Root, e.Name())
+		// owners maps each git root under repoDir to its remote owner; a
+		// file belongs to its nearest enclosing git root.
+		owners := map[string]string{}
 		err := filepath.WalkDir(repoDir, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return nil // unreadable subtree; not fatal
@@ -105,9 +133,18 @@ func harvestRepos(ctx context.Context, o ReposOptions, st *Stats) ([]corpus.Reco
 				if skipDirs[d.Name()] {
 					return filepath.SkipDir
 				}
+				if ow, ok := remoteOwner(ctx, p); ok {
+					owners[p] = ow
+				}
 				return nil
 			}
 			if d.Type()&fs.ModeSymlink != 0 || !isPromptFile(d.Name()) {
+				return nil
+			}
+			rel, _ := filepath.Rel(o.Root, p)
+			if why := promptExclusion(o.Root, rel, owners, o.PromptOwners); why != "" {
+				st.PromptExcluded[filepath.ToSlash(rel)] = why
+				st.skip(src, "", "prompt-file-"+strings.SplitN(why, " ", 2)[0], 1)
 				return nil
 			}
 			b, err := os.ReadFile(p)
@@ -119,7 +156,6 @@ func harvestRepos(ctx context.Context, o ReposOptions, st *Stats) ([]corpus.Reco
 			if info != nil {
 				ts = info.ModTime().UTC().Format(time.RFC3339)
 			}
-			rel, _ := filepath.Rel(o.Root, p)
 			out = append(out, corpus.Record{
 				Source:     src,
 				AuthorKind: corpus.AuthorAgent,
@@ -147,6 +183,31 @@ func harvestRepos(ctx context.Context, o ReposOptions, st *Stats) ([]corpus.Reco
 		out = append(out, recs...)
 	}
 	return out, nil
+}
+
+// promptExclusion says why a matched prompt file is not kept, or "".
+func promptExclusion(root, rel string, owners map[string]string, allowed []string) string {
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	for _, seg := range parts[:len(parts)-1] {
+		if vendoredDirs[seg] {
+			return "excluded:vendored-dir " + seg
+		}
+	}
+	if len(allowed) == 0 {
+		return ""
+	}
+	for dir := filepath.Dir(filepath.Join(root, rel)); len(dir) >= len(root); dir = filepath.Dir(dir) {
+		if ow, ok := owners[dir]; ok {
+			if ow == "" || slices.Contains(allowed, ow) {
+				return ""
+			}
+			return "excluded:remote-owner " + ow
+		}
+		if dir == root {
+			break
+		}
+	}
+	return "" // not in any git repository: no remote
 }
 
 var reGitHubRemote = regexp.MustCompile(`github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$`)

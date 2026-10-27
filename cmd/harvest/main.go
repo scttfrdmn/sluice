@@ -5,14 +5,15 @@
 // cmd/harvest).
 //
 //	harvest pull-sessions [-config f] [-dest corpus/raw/claude-code]
-//	harvest subsample -run <id> [-per-stratum N] [-split calibration]
+//	harvest subsample -run <id> [-per-stratum N] [-split calibration|all]
 //	harvest -run <id> [-claude-code dir] [-claude-export f] [-chatgpt-export f]
 //	        [-repos dir] [-wildchat N] ...
 //
 // Output: runs/<id>/records.jsonl and runs/<id>/repo_prompt_files.txt (local
 // only) and runs/<id>/harvest_stats.json (aggregate counts, publishable).
 // subsample writes runs/<id>/subsample.json, the E0 subsample that tag,
-// matrix, label and report then restrict to.
+// matrix, label and report then restrict to, and subsample_test.json, the
+// matching test-split draw that is not tagged until the test split opens.
 package main
 
 import (
@@ -96,7 +97,7 @@ func run() error {
 		WildchatN:    *wildchatN,
 	}
 	if *repos != "" {
-		o.Repos = harvest.ReposOptions{Root: expand(*repos), Owner: *owner, Exclude: cfg.Harvest.ExcludeRepos}
+		o.Repos = harvest.ReposOptions{Root: expand(*repos), Owner: *owner, Exclude: cfg.Harvest.ExcludeRepos, PromptOwners: cfg.Harvest.PromptFileOwners}
 		if o.Repos.Owner == "" {
 			o.Repos.Owner = cfg.Harvest.Owner
 		}
@@ -150,8 +151,8 @@ func runSubsample(args []string) error {
 	runsRoot := fs.String("runs", "runs", "runs root")
 	runID := fs.String("run", "", "run id (required)")
 	per := fs.Int("per-stratum", 0, "requests per stratum (default: config harvest.e0_per_stratum)")
-	split := fs.String("split", "", "calibration | test | all (default: config harvest.e0_split)")
-	corpusMD := fs.String("corpus-md", "", "append the subsample table to this markdown file (e.g. docs/CORPUS.md)")
+	split := fs.String("split", "", "calibration | all (default: config harvest.e0_split); calibration also draws the matching test subsample")
+	corpusMD := fs.String("corpus-md", "", "append the subsample tables to this markdown file (e.g. docs/CORPUS.md)")
 	fs.Parse(args)
 	if *runID == "" {
 		return errors.New("-run is required")
@@ -169,39 +170,58 @@ func runSubsample(args []string) error {
 	if *per <= 0 {
 		return errors.New("per-stratum must be positive")
 	}
+	if *split != "calibration" && *split != "all" {
+		return errors.New("-split must be calibration or all")
+	}
 	dir, err := rundir.Open(*runsRoot, *runID)
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(dir.Subsample()); err == nil {
-		return fmt.Errorf("%s exists; the subsample is drawn once per run", dir.Subsample())
+	// The calibration draw goes to subsample.json; with it, the test split
+	// gets the matching draw (same seed scheme, same cap) in
+	// subsample_test.json, which tag only reads with -subsample test. Each
+	// file is drawn once per run; an existing one is left as is.
+	draws := []struct{ split, path, title string }{{*split, dir.Subsample(), "E0 subsample"}}
+	if *split == "calibration" {
+		draws = append(draws, struct{ split, path, title string }{"test", dir.SubsampleTest(), "E0 test subsample (drawn, not tagged)"})
 	}
 	recs, err := jsonl.Read[corpus.Record](dir.Records())
 	if err != nil {
 		return err
 	}
-	s := corpus.DrawSubsample(recs, *per, *split, cfg.Seeds.E0Sample)
-	if err := corpus.WriteSubsample(dir.Subsample(), s); err != nil {
-		return err
-	}
-	fmt.Printf("subsample (split %s, seed %d, %d per stratum):\n", s.Split, s.Seed, s.PerStratum)
-	for _, k := range slices.Sorted(maps.Keys(s.Available)) {
-		fmt.Printf("  %-20s %6d of %6d\n", k, s.Selected[k], s.Available[k])
-	}
-	fmt.Printf("wrote %d ids to %s\n", len(s.IDs), dir.Subsample())
+	var md *os.File
 	if *corpusMD != "" {
-		f, err := os.OpenFile(*corpusMD, os.O_APPEND|os.O_WRONLY, 0o644)
-		if err != nil {
+		if md, err = os.OpenFile(*corpusMD, os.O_APPEND|os.O_WRONLY, 0o644); err != nil {
 			return err
 		}
-		fmt.Fprintf(f, "\n## E0 subsample\n\nSeeded (seed %d), stratified draw from the %s split, up to %d requests per stratum (PROJECT.md §5). E0 runs on these requests only.\n\n| stratum | selected | available |\n|---|---:|---:|\n", s.Seed, s.Split, s.PerStratum)
+		defer md.Close()
+	}
+	drew := 0
+	for _, d := range draws {
+		if _, err := os.Stat(d.path); err == nil {
+			fmt.Printf("%s exists; drawn once per run, left as is\n", d.path)
+			continue
+		}
+		s := corpus.DrawSubsample(recs, *per, d.split, cfg.Seeds.E0Sample)
+		if err := corpus.WriteSubsample(d.path, s); err != nil {
+			return err
+		}
+		drew++
+		fmt.Printf("%s (split %s, seed %d, %d per stratum):\n", d.title, s.Split, s.Seed, s.PerStratum)
 		for _, k := range slices.Sorted(maps.Keys(s.Available)) {
-			fmt.Fprintf(f, "| %s | %d | %d |\n", k, s.Selected[k], s.Available[k])
+			fmt.Printf("  %-20s %6d of %6d\n", k, s.Selected[k], s.Available[k])
 		}
-		fmt.Fprintf(f, "| **total** | %d | |\n", len(s.IDs))
-		if err := f.Close(); err != nil {
-			return err
+		fmt.Printf("wrote %d ids to %s\n", len(s.IDs), d.path)
+		if md != nil {
+			fmt.Fprintf(md, "\n## %s\n\nSeeded (seed %d), stratified draw from the %s split, up to %d requests per stratum (PROJECT.md §5).\n\n| stratum | selected | available |\n|---|---:|---:|\n", d.title, s.Seed, s.Split, s.PerStratum)
+			for _, k := range slices.Sorted(maps.Keys(s.Available)) {
+				fmt.Fprintf(md, "| %s | %d | %d |\n", k, s.Selected[k], s.Available[k])
+			}
+			fmt.Fprintf(md, "| **total** | %d | |\n", len(s.IDs))
 		}
+	}
+	if drew == 0 {
+		return errors.New("nothing drawn: every subsample file already exists")
 	}
 	return nil
 }

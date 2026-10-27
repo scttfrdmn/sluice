@@ -16,7 +16,7 @@ Every stage is resumable, and model outputs are cached by SHA-256 of their input
 | stage | reads | writes |
 |---|---|---|
 | `harvest` | `corpus/raw/**` | `records.jsonl`, `harvest_stats.json`, `repo_prompt_files.txt` |
-| `harvest subsample` | `records.jsonl` | `subsample.json` (E0 subsample) |
+| `harvest subsample` | `records.jsonl` | `subsample.json` (E0 subsample), `subsample_test.json` (test draw, not tagged) |
 | `estimate` | `records.jsonl`, `subsample.json` | projected spend (stdout) |
 | `tag` | `records.jsonl`, `subsample.json` | `tags.jsonl`, `leaves.jsonl` |
 | `matrix` | `leaves.jsonl` | `matrix/part-*.parquet` |
@@ -34,15 +34,23 @@ A real run uses the same commands with `config/sluice.yaml`, which uses the
 Bedrock backend:
 
 ```sh
-bin/harvest -run r1 -claude-code corpus/raw/claude-code \
+bin/harvest -run r2 -claude-code corpus/raw/claude-code \
   -claude-export corpus/raw/claude-export/conversations.json \
   -chatgpt-export corpus/raw/chatgpt-export \
-  -repos ~/src -wildchat 3000
-bin/tag -run r1 && bin/matrix -run r1 && bin/label -run r1 && bin/report -run r1
+  -repos ~/src -wildchat 3000 -corpus-md docs/CORPUS.md
+bin/harvest subsample -run r2 -corpus-md docs/CORPUS.md
+bin/estimate -run r2                       # projected spend, before any call
+bin/tag -run r2 -max-spend <usd>           # then re-run estimate on measured leaves
+bin/matrix -run r2 -max-spend <usd>
+bin/label -run r2 -max-spend <usd>
+bin/report -run r2
 ```
 
-`report` defaults to the calibration split. You can open the test split once per run with
-`-split test`.
+Every stage that calls a model requires `-max-spend`. It halts cleanly at
+the cap and can be resumed. `report` defaults to the calibration split. The
+test split has its own subsample (`subsample_test.json`). You open it once,
+under separate caps, with
+`make open-test RUN=r2 TAG_CAP=.. MATRIX_CAP=.. LABEL_CAP=..`.
 
 ## Configuration
 

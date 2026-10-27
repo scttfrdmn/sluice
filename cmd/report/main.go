@@ -85,13 +85,28 @@ func run() error {
 	if in.Records, err = jsonl.Read[corpus.Record](dir.Records()); err != nil {
 		return err
 	}
-	ids, ss, err := corpus.ReadSubsample(dir.Subsample())
-	if err != nil {
-		return err
+	// Restrict the corpus tables to the subsample of the reported split
+	// (both for -split all).
+	paths := map[string][]string{"calibration": {dir.Subsample()}, "test": {dir.SubsampleTest()}, "all": {dir.Subsample(), dir.SubsampleTest()}}[*split]
+	var union map[string]bool
+	for _, p := range paths {
+		ids, ss, err := corpus.ReadSubsample(p)
+		if err != nil {
+			return err
+		}
+		if ids == nil {
+			continue
+		}
+		if union == nil {
+			union = map[string]bool{}
+			in.Subsample = ss
+		}
+		for id := range ids {
+			union[id] = true
+		}
 	}
-	if ids != nil {
-		in.Records = corpus.FilterSubsample(in.Records, ids)
-		in.Subsample = ss
+	if union != nil {
+		in.Records = corpus.FilterSubsample(in.Records, union)
 	}
 	if in.Tags, err = jsonl.Read[corpus.TagResult](dir.Tags()); err != nil {
 		return err

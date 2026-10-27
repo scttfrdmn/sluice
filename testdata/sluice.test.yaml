@@ -73,6 +73,7 @@ harvest:
   drop_sample_size: 50
   owner: scttfrdmn
   exclude_repos: [sluice]
+  prompt_file_owners: [scttfrdmn, playgroundlogic, provabl, trnsci]
   wildchat_oversample: 1.6
   wildchat_dataset: allenai/WildChat-1M
   wildchat_fallback: lmsys/lmsys-chat-1m

@@ -19,6 +19,7 @@ import (
 	"github.com/scttfrdmn/sluice/internal/llm"
 	"github.com/scttfrdmn/sluice/internal/matrix"
 	"github.com/scttfrdmn/sluice/internal/rundir"
+	"github.com/scttfrdmn/sluice/internal/spend"
 )
 
 func main() {
@@ -35,10 +36,14 @@ func run() error {
 		runID    = flag.String("run", "", "run id (required)")
 		split    = flag.String("split", "", "only leaves from this split (default: all)")
 		limit    = flag.Int("limit", 0, "only the first N leaves (0 = all), for smoke tests")
+		maxSpend = spend.Flag(nil)
 	)
 	flag.Parse()
 	if *runID == "" {
 		return errors.New("-run is required")
+	}
+	if err := spend.Require(*maxSpend); err != nil {
+		return err
 	}
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -72,5 +77,5 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	return matrix.Run(ctx, cfg, be, leaves, matrix.Options{Dir: dir.MatrixDir(), ErrorsLog: dir.MatrixErrors(), Log: os.Stdout})
+	return matrix.Run(ctx, cfg, be, leaves, matrix.Options{Dir: dir.MatrixDir(), ErrorsLog: dir.MatrixErrors(), Log: os.Stdout, MaxSpend: *maxSpend})
 }

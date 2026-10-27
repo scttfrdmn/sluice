@@ -52,19 +52,23 @@ type Report struct {
 	// author:*).
 	ClassByGroup  map[string]map[string]int `json:"class_by_group"`
 	BreakdownCols []string                  `json:"breakdown_groups"`
-	Coverage      Coverage                  `json:"coverage"`
-	Noise         []NoiseRow                `json:"noise"`
-	NoiseByGroup  []NoiseRow                `json:"noise_by_group"`
-	Classes       []ClassRow                `json:"classes"`
-	Groups        map[string]Headline       `json:"groups"`
-	GroupOrder    []string                  `json:"group_order"`
-	CostLatency   []ModelCost               `json:"cost_latency"`
-	Policy        PolicyCost                `json:"policy_cost"`
-	TaggerCostUSD float64                   `json:"tagger_cost_usd"`
-	LabelCostUSD  float64                   `json:"label_cost_usd"`
-	Decision      string                    `json:"decision"`
-	DecisionRule  string                    `json:"decision_rule"`
-	ClassRho      map[string]*float64       `json:"class_rho"`
+	// ClassCross is leaves per class per "source / author_kind" cell (n
+	// only), so the sparsity behind the pooled per-class tables is visible.
+	ClassCross     map[string]map[string]int `json:"class_by_source_author_kind"`
+	ClassCrossCols []string                  `json:"source_author_kind_cells"`
+	Coverage       Coverage                  `json:"coverage"`
+	Noise          []NoiseRow                `json:"noise"`
+	NoiseByGroup   []NoiseRow                `json:"noise_by_group"`
+	Classes        []ClassRow                `json:"classes"`
+	Groups         map[string]Headline       `json:"groups"`
+	GroupOrder     []string                  `json:"group_order"`
+	CostLatency    []ModelCost               `json:"cost_latency"`
+	Policy         PolicyCost                `json:"policy_cost"`
+	TaggerCostUSD  float64                   `json:"tagger_cost_usd"`
+	LabelCostUSD   float64                   `json:"label_cost_usd"`
+	Decision       string                    `json:"decision"`
+	DecisionRule   string                    `json:"decision_rule"`
+	ClassRho       map[string]*float64       `json:"class_rho"`
 }
 
 // ModelInfo is one pool entry as printed.
@@ -195,7 +199,9 @@ func Build(in Inputs) (*Report, error) {
 	rep.CorpusByAuthor = corpusRows(in.Records, in.Tags, func(r corpus.Record) [2]string { return [2]string{"", r.AuthorKind} })
 	rep.CorpusCross = corpusRows(in.Records, in.Tags, func(r corpus.Record) [2]string { return [2]string{r.Source, r.AuthorKind} })
 	rep.ClassByGroup = map[string]map[string]int{}
+	rep.ClassCross = map[string]map[string]int{}
 	cols := map[string]bool{}
+	cross := map[string]bool{}
 	for _, l := range in.Leaves {
 		rep.ClassHistogram[l.Class]++
 		if rep.ClassByGroup[l.Class] == nil {
@@ -205,7 +211,14 @@ func Build(in Inputs) (*Report, error) {
 			rep.ClassByGroup[l.Class][g]++
 			cols[g] = true
 		}
+		if rep.ClassCross[l.Class] == nil {
+			rep.ClassCross[l.Class] = map[string]int{}
+		}
+		cell := l.Source + " / " + l.AuthorKind
+		rep.ClassCross[l.Class][cell]++
+		cross[cell] = true
 	}
+	rep.ClassCrossCols = orderCross(cross)
 	rep.BreakdownCols = orderGroups(cols)
 
 	// Labels by cell, cells by key.
@@ -518,6 +531,26 @@ func orderGroups(set map[string]bool) []string {
 	rest := make([]string, 0, len(set))
 	for g := range set {
 		rest = append(rest, g)
+	}
+	sort.Strings(rest)
+	return append(out, rest...)
+}
+
+// orderCross orders "source / author_kind" cells by source order, then
+// author-kind order.
+func orderCross(set map[string]bool) []string {
+	var out []string
+	for _, s := range sourceOrder {
+		for _, a := range corpus.AuthorKinds {
+			if c := s + " / " + a; set[c] {
+				out = append(out, c)
+				delete(set, c)
+			}
+		}
+	}
+	rest := make([]string, 0, len(set))
+	for c := range set {
+		rest = append(rest, c)
 	}
 	sort.Strings(rest)
 	return append(out, rest...)

@@ -64,8 +64,12 @@ func (d Dir) Plot(name string) string { return d.p(name) }
 // Path joins an arbitrary name under the run directory.
 func (d Dir) Path(name string) string { return d.p(name) }
 
-// Subsample is the E0 subsample: seed, strata counts and selected ids.
+// Subsample is the E0 calibration subsample: seed, strata counts and ids.
 func (d Dir) Subsample() string { return d.p("subsample.json") }
+
+// SubsampleTest is the matching test-split subsample, drawn with the
+// calibration one and not tagged until the test split is opened.
+func (d Dir) SubsampleTest() string { return d.p("subsample_test.json") }
 
 // PromptFiles lists the repo prompt files the harvest kept (local only).
 func (d Dir) PromptFiles() string { return d.p("repo_prompt_files.txt") }

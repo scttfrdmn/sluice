@@ -27,6 +27,7 @@ import (
 	"github.com/scttfrdmn/sluice/internal/llm"
 	"github.com/scttfrdmn/sluice/internal/matrix"
 	"github.com/scttfrdmn/sluice/internal/rundir"
+	"github.com/scttfrdmn/sluice/internal/spend"
 )
 
 func main() {
@@ -51,10 +52,15 @@ func run() error {
 		cfgPath  = flag.String("config", "config/sluice.yaml", "config file")
 		runsRoot = flag.String("runs", "runs", "runs root")
 		runID    = flag.String("run", "", "run id (required)")
+		split    = flag.String("split", "", "only leaves from this split (default: all)")
+		maxSpend = spend.Flag(nil)
 	)
 	flag.Parse()
 	if *runID == "" {
 		return errors.New("-run is required")
+	}
+	if err := spend.Require(*maxSpend); err != nil {
+		return err
 	}
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -81,6 +87,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if *split != "" {
+		var f []corpus.Leaf
+		for _, l := range leaves {
+			if l.Split == *split {
+				f = append(f, l)
+			}
+		}
+		leaves = f
+	}
 	leafByID := make(map[string]corpus.Leaf, len(leaves))
 	for _, l := range leaves {
 		leafByID[l.LeafID] = l
@@ -92,6 +107,27 @@ func run() error {
 	if err := jsonl.Each(dir.Refs(), func(r label.Ref) error { refs[r.LeafID] = r; return nil }); err != nil {
 		return err
 	}
+	labels := map[string]label.Label{}
+	if err := jsonl.Each(dir.Labels(), func(l label.Label) error { labels[l.Key()] = l; return nil }); err != nil {
+		return err
+	}
+	// The stage cap is cumulative: earlier passes' reference and label
+	// costs for these leaves count against it.
+	var prior float64
+	for _, r := range refs {
+		if _, ok := leafByID[r.LeafID]; ok {
+			prior += r.CostUSD
+		}
+	}
+	for _, l := range labels {
+		if _, ok := leafByID[l.LeafID]; ok {
+			prior += l.CostUSD
+		}
+	}
+	budget := spend.New(*maxSpend, prior)
+	lb.Spend = budget
+	defer func() { fmt.Println(budget.Summary("label")) }()
+
 	refApp, err := jsonl.OpenAppender(dir.Refs())
 	if err != nil {
 		return err
@@ -104,6 +140,9 @@ func run() error {
 		k := label.Kind(l)
 		if (k != "code" && k != "numeric") || refs[l.LeafID].Status != "" {
 			continue
+		}
+		if budget.Exhausted() {
+			break
 		}
 		g.Go(func() error {
 			r, err := lb.MakeRef(gctx, l)
@@ -125,14 +164,14 @@ func run() error {
 	if n := refErr.Load(); n > 0 {
 		return fmt.Errorf("%d references failed; rerun to retry", n)
 	}
+	if budget.Stopped() {
+		// Labels need their references; do not label against missing ones.
+		return fmt.Errorf("label: %w during reference generation", spend.ErrCap)
+	}
 
 	// 2. Labels, once per cell.
 	cells, err := matrix.ReadAll(dir.MatrixDir())
 	if err != nil {
-		return err
-	}
-	labels := map[string]label.Label{}
-	if err := jsonl.Each(dir.Labels(), func(l label.Label) error { labels[l.Key()] = l; return nil }); err != nil {
 		return err
 	}
 	var todo []matrix.Cell
@@ -152,6 +191,9 @@ func run() error {
 	g2, gctx2 := errgroup.WithContext(ctx)
 	g2.SetLimit(workers)
 	for _, c := range todo {
+		if budget.Exhausted() {
+			break
+		}
 		g2.Go(func() error {
 			l, err := lb.LabelCell(gctx2, leafByID[c.LeafID], c, refs[c.LeafID])
 			if err != nil {
@@ -199,6 +241,9 @@ func run() error {
 	fmt.Printf("label: %d refs, %d new labels, %d errors, %d of %d cells unlabeled\n", len(refs), nNew.Load(), nErr.Load(), unlabeled, len(cells))
 	if nErr.Load() > 0 {
 		return fmt.Errorf("%d cells failed to label; rerun to retry", nErr.Load())
+	}
+	if budget.Stopped() {
+		return fmt.Errorf("label: %w; %d cells still unlabeled", spend.ErrCap, unlabeled)
 	}
 	return nil
 }

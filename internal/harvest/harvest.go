@@ -75,10 +75,13 @@ type Stats struct {
 	// "outcome<TAB>path" (kept, or the filter that dropped it). Local only:
 	// not written to harvest_stats.json.
 	PromptFiles []string `json:"-"`
+	// PromptExcluded maps matched prompt files that were not harvested to
+	// the reason (vendored dir, remote owner).
+	PromptExcluded map[string]string `json:"-"`
 }
 
 func newStats() *Stats {
-	return &Stats{rows: map[Key]*Row{}, PatternHits: map[string]int{}, LangDetail: map[string]int{}, Splits: map[string]int{}, AuthorRules: map[string]int{}}
+	return &Stats{rows: map[Key]*Row{}, PatternHits: map[string]int{}, LangDetail: map[string]int{}, Splits: map[string]int{}, AuthorRules: map[string]int{}, PromptExcluded: map[string]string{}}
 }
 
 func (s *Stats) row(source, host string) *Row {
@@ -272,6 +275,9 @@ func Run(ctx context.Context, cfg *config.Config, o Options) ([]corpus.Record, *
 		st.Splits[kept[i].Split]++
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].ID < kept[j].ID })
+	for f, why := range st.PromptExcluded {
+		fate[f] = why
+	}
 	for _, f := range sortedKeys(fate) {
 		st.PromptFiles = append(st.PromptFiles, fate[f]+"\t"+f)
 	}

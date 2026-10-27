@@ -20,6 +20,7 @@ import (
 	"github.com/scttfrdmn/sluice/internal/corpus"
 	"github.com/scttfrdmn/sluice/internal/jsonl"
 	"github.com/scttfrdmn/sluice/internal/llm"
+	"github.com/scttfrdmn/sluice/internal/spend"
 )
 
 // Backend is a client that can run calls on demand and in batch.
@@ -33,6 +34,9 @@ type Options struct {
 	Dir       string // matrix part-file directory
 	ErrorsLog string // matrix_errors.jsonl
 	Log       io.Writer
+	// MaxSpend is the stage cap in USD, cumulative with the cost of cells
+	// already in the matrix (package spend).
+	MaxSpend float64
 }
 
 // CellError records a cell that failed after all retries. It is retried on
@@ -66,10 +70,19 @@ func Run(ctx context.Context, cfg *config.Config, be Backend, leaves []corpus.Le
 	if err != nil {
 		return err
 	}
+	inScope := make(map[string]bool, len(leaves))
+	for _, l := range leaves {
+		inScope[l.LeafID] = true
+	}
 	have := make(map[string]bool, len(existing))
+	var prior float64 // cost of existing cells for these leaves counts against the cap
 	for _, c := range existing {
 		have[c.Key()] = true
+		if inScope[c.LeafID] {
+			prior += c.CostUSD
+		}
 	}
+	budget := spend.New(o.MaxSpend, prior)
 	var pending []job
 	for _, l := range leaves {
 		for _, m := range cfg.Models {
@@ -84,6 +97,7 @@ func Run(ctx context.Context, cfg *config.Config, be Backend, leaves []corpus.Le
 	fmt.Fprintf(o.Log, "matrix: %d cells exist, %d pending (%d leaves × %d models × %d draws)\n",
 		len(existing), len(pending), len(leaves), len(cfg.Models), cfg.Matrix.Draws)
 	if len(pending) == 0 {
+		fmt.Fprintln(o.Log, budget.Summary("matrix"))
 		return nil
 	}
 
@@ -123,13 +137,14 @@ func Run(ctx context.Context, cfg *config.Config, be Backend, leaves []corpus.Le
 
 	var nFail atomic.Int64
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return runOnDemand(gctx, cfg, be, onDemand, w, errs, &nFail, o.Log) })
+	g.Go(func() error { return runOnDemand(gctx, cfg, be, onDemand, w, errs, &nFail, budget, o.Log) })
 	for _, js := range batchByModel {
-		g.Go(func() error { return runBatch(gctx, cfg, be, js, w, errs, &nFail, o.Log) })
+		g.Go(func() error { return runBatch(gctx, cfg, be, js, w, errs, &nFail, budget, o.Log) })
 	}
 	runErr := g.Wait()
 	n, werr := w.Close()
 	fmt.Fprintf(o.Log, "matrix: wrote %d cells, %d failed (logged to %s)\n", n, nFail.Load(), o.ErrorsLog)
+	fmt.Fprintln(o.Log, budget.Summary("matrix"))
 	if runErr != nil {
 		return runErr
 	}
@@ -139,7 +154,19 @@ func Run(ctx context.Context, cfg *config.Config, be Backend, leaves []corpus.Le
 	if nFail.Load() > 0 {
 		return fmt.Errorf("%d cells failed; rerun to retry them", nFail.Load())
 	}
+	if budget.Stopped() {
+		return fmt.Errorf("matrix: %w; %d of %d pending cells written", spend.ErrCap, n, len(pending))
+	}
 	return nil
+}
+
+// worstCase is the most a batch record can cost: the prompt (chars per
+// token with a 1.5× margin) plus max_tokens of output, at the price the
+// cell will be recorded at.
+func worstCase(cfg *config.Config, j job) float64 {
+	in := int(1.5*float64(len(j.leaf.Prompt()))/cfg.Taxonomy.CharsPerToken) + 50
+	c, _ := j.model.Cost(in, cfg.Matrix.MaxTokens, true)
+	return c
 }
 
 func request(cfg *config.Config, j job) llm.Request {
@@ -163,7 +190,7 @@ func baseCell(cfg *config.Config, j job, r llm.Response, mode string) Cell {
 	}
 }
 
-func runOnDemand(ctx context.Context, cfg *config.Config, be Backend, jobs []job, w *Writer, errs *jsonl.Appender, nFail *atomic.Int64, log io.Writer) error {
+func runOnDemand(ctx context.Context, cfg *config.Config, be Backend, jobs []job, w *Writer, errs *jsonl.Appender, nFail *atomic.Int64, budget *spend.Budget, log io.Writer) error {
 	type lane struct {
 		sem chan struct{}
 		lim *rate.Limiter
@@ -182,6 +209,9 @@ func runOnDemand(ctx context.Context, cfg *config.Config, be Backend, jobs []job
 	var firstErr error
 	var mu sync.Mutex
 	for _, j := range jobs {
+		if budget.Exhausted() {
+			break // in-flight calls finish; the rest stay pending
+		}
 		l := lanes[j.model.Name]
 		select {
 		case l.sem <- struct{}{}:
@@ -203,6 +233,7 @@ func runOnDemand(ctx context.Context, cfg *config.Config, be Backend, jobs []job
 				return
 			}
 			c := baseCell(cfg, j, r, ModeOnDemand)
+			budget.Add(c.CostUSD)
 			lat := r.LatencyMs
 			c.LatencyMs = &lat
 			if err := w.Add(c); err != nil {
@@ -221,11 +252,21 @@ func runOnDemand(ctx context.Context, cfg *config.Config, be Backend, jobs []job
 	return firstErr
 }
 
-func runBatch(ctx context.Context, cfg *config.Config, be Backend, jobs []job, w *Writer, errs *jsonl.Appender, nFail *atomic.Int64, log io.Writer) error {
+func runBatch(ctx context.Context, cfg *config.Config, be Backend, jobs []job, w *Writer, errs *jsonl.Appender, nFail *atomic.Int64, budget *spend.Budget, log io.Writer) error {
 	m := jobs[0].model
 	maxRec := max(cfg.Matrix.BatchMinRecords, cfg.Matrix.BatchMaxRecords)
-	for start := 0; start < len(jobs); start += maxRec {
+	for start := 0; start < len(jobs); {
 		chunk := jobs[start:min(len(jobs), start+maxRec)]
+		wc := make([]float64, len(chunk))
+		for i, j := range chunk {
+			wc[i] = worstCase(cfg, j)
+		}
+		k, reserved := budget.Reserve(wc, cfg.Matrix.BatchMinRecords)
+		if k == 0 {
+			fmt.Fprintf(log, "matrix: batch for %s deferred at the spend cap: %d records left pending\n", m.Name, len(jobs)-start)
+			return nil
+		}
+		chunk = chunk[:k]
 		items := make([]llm.BatchItem, len(chunk))
 		byID := make(map[string]job, len(chunk))
 		for i, j := range chunk {
@@ -233,15 +274,18 @@ func runBatch(ctx context.Context, cfg *config.Config, be Backend, jobs []job, w
 			items[i] = llm.BatchItem{RecordID: id, Request: request(cfg, j)}
 			byID[id] = j
 		}
-		fmt.Fprintf(log, "matrix: batch job for %s, %d records\n", m.Name, len(items))
+		fmt.Fprintf(log, "matrix: batch job for %s, %d records (worst-case reservation $%.2f)\n", m.Name, len(items), reserved)
 		res, wall, err := be.RunBatch(ctx, m, items)
+		var actual float64
 		if err != nil {
+			budget.Settle(reserved, 0)
 			// The whole job failed: log every cell so a rerun retries them.
 			for _, j := range byID {
 				nFail.Add(1)
 				errs.Append(CellError{Key: CellKey(j.leaf.LeafID, j.model.Name, j.draw), Mode: ModeBatch, Error: err.Error(), At: time.Now().UTC().Format(time.RFC3339)})
 			}
 			fmt.Fprintf(log, "matrix: batch job for %s failed: %v\n", m.Name, err)
+			start += len(chunk)
 			continue
 		}
 		for id, j := range byID {
@@ -256,12 +300,16 @@ func runBatch(ctx context.Context, cfg *config.Config, be Backend, jobs []job, w
 				continue
 			}
 			c := baseCell(cfg, j, br.Response, ModeBatch)
+			actual += c.CostUSD
 			wl := wall
 			c.BatchWallMs = &wl
 			if err := w.Add(c); err != nil {
+				budget.Settle(reserved, actual)
 				return err
 			}
 		}
+		budget.Settle(reserved, actual)
+		start += len(chunk)
 	}
 	return nil
 }

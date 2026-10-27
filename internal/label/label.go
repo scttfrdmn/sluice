@@ -22,6 +22,7 @@ import (
 	"github.com/scttfrdmn/sluice/internal/corpus"
 	"github.com/scttfrdmn/sluice/internal/llm"
 	"github.com/scttfrdmn/sluice/internal/matrix"
+	"github.com/scttfrdmn/sluice/internal/spend"
 	"github.com/scttfrdmn/sluice/internal/tagger"
 )
 
@@ -81,6 +82,8 @@ type Labeler struct {
 	testT   *template.Template
 	numT    *template.Template
 	srcs    string // concatenated template sources, part of every cache key
+	// Spend, if set, receives the measured cost of every uncached call.
+	Spend *spend.Budget
 }
 
 // New builds a labeler.
@@ -126,6 +129,24 @@ func Kind(l corpus.Leaf) string {
 	return "judge"
 }
 
+// Plan is how a leaf will be labeled before any call is made, for spend
+// estimates: which reference it needs ("test", "numeric" or "") and whether
+// its cells go to the judges. Numeric leaves whose reference fails also go
+// to the judges; that is not knowable in advance and not counted here.
+func Plan(l corpus.Leaf) (ref string, judged bool) {
+	switch Kind(l) {
+	case "code":
+		lang := NormLang(strings.TrimPrefix(l.VerifierHint, "code:"))
+		if testLangs[lang] {
+			ref = "test"
+		}
+		return ref, !compileLangs[lang]
+	case "numeric":
+		return "numeric", false
+	}
+	return "", true // judge and format leaves
+}
+
 // call invokes a model through the cache.
 func (lb *Labeler) call(ctx context.Context, m config.Model, req llm.Request) (llm.Response, float64, error) {
 	key := cache.Key(string(req.Purpose), m.ID, req.Prompt, fmt.Sprint(req.Draw))
@@ -140,6 +161,9 @@ func (lb *Labeler) call(ctx context.Context, m config.Model, req llm.Request) (l
 		return r, 0, err
 	}
 	cost, _ := m.Cost(r.TokensIn, r.TokensOut, false)
+	if lb.Spend != nil {
+		lb.Spend.Add(cost)
+	}
 	return r, cost, lb.cache.Put(key, r)
 }
 

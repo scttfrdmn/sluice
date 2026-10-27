@@ -24,6 +24,7 @@ import (
 	"github.com/scttfrdmn/sluice/internal/config"
 	"github.com/scttfrdmn/sluice/internal/corpus"
 	"github.com/scttfrdmn/sluice/internal/llm"
+	"github.com/scttfrdmn/sluice/internal/spend"
 )
 
 // Tagger is anything that tags a request.
@@ -49,6 +50,8 @@ type StrongModel struct {
 	cache   *cache.Cache
 	tmpl    *template.Template
 	tmplSrc string
+	// Spend, if set, receives the measured cost of every model call.
+	Spend *spend.Budget
 }
 
 // NewStrongModel loads the tag prompt template.
@@ -110,6 +113,9 @@ func (s *StrongModel) Tag(ctx context.Context, r corpus.Record) (corpus.TagResul
 		res.TokensOut += resp.TokensOut
 		c, _ := s.model.Cost(resp.TokensIn, resp.TokensOut, false)
 		res.CostUSD += c
+		if s.Spend != nil {
+			s.Spend.Add(c)
+		}
 		leaves, standalone, verr := s.validate(r.Text, resp.Text)
 		if verr == nil {
 			res.Status, res.Error, res.Standalone, res.Leaves = corpus.TagOK, "", standalone, leaves

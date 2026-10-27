@@ -12,9 +12,14 @@ semantic versioning on the 0.x series.
 - `estimate`: projected E0 spend by model and stage from the price table and the subsample's token statistics.
 - Report: every table broken out by source and by `author_kind`; a source-balanced pooled ρ next to the natural-weight one; noise by group; class histogram by group.
 - `runs/<id>/repo_prompt_files.txt`: every matched repo prompt file and its outcome.
+- `-max-spend <usd>` on `tag`, `matrix` and `label`, required: cost accumulates from measured tokens and the price table, cumulative across passes over the same leaves; the stage halts cleanly (resumable) at the cap. Batch jobs reserve their worst case before submission.
+- `harvest subsample` also draws the matching test-split subsample into `subsample_test.json` (not tagged); `tag -subsample test`, `matrix -split test`, `label -split test` and `make open-test` open the test split later under separate caps.
+- `estimate` uses measured leaves per request, leaf prompt tokens, reference and judge shares, and tag spend once the tag pass has run; `-subsample test` budgets the test split.
+- Report: class × source × author_kind count table (n only).
 - ChatGPT export: `-chatgpt-export` and `probe chatgpt-export` accept a directory of per-conversation JSON files as well as `conversations.json`. Observed schema in `docs/SCHEMAS.md`.
 
 ### Changed
+- Repo prompt files come only from repos whose nearest git remote is owned by `harvest.prompt_file_owners` (scttfrdmn, playgroundlogic, provabl, trnsci) or that have no remote; matches under `vendor/` and `.hermit/` are excluded. Exclusions are listed with their reason in `repo_prompt_files.txt`.
 - Repo prompt files match case-insensitive globs (`*kickoff*prompt*.md`, `*CLAUDE_CODE_PROMPT*.md`, `*PROMPT*.md`, `*_prompt.md`, `*.prompt.md`) plus `PROJECT.md`, excluding `README*`, `CHANGELOG*`, `LICENSE*`.
 
 ## [0.1.0] - 2026-10-26
