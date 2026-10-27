@@ -121,6 +121,10 @@ func (s *StrongModel) Tag(ctx context.Context, r corpus.Record) (corpus.TagResul
 			res.Status, res.Error, res.Standalone, res.Leaves = corpus.TagOK, "", standalone, leaves
 			break
 		}
+		if strings.TrimSpace(resp.Text) == "" {
+			// Empty output is a refusal or filter, not a format error; keep why.
+			verr = fmt.Errorf("empty output (stop_reason=%s)", resp.StopReason)
+		}
 		res.Status, res.Error = corpus.TagFailed, verr.Error()
 		prompt = sb.String() + "\n\nYour previous output was invalid: " + verr.Error() +
 			"\nPrevious output:\n" + resp.Text + "\n\nReturn the corrected JSON only."

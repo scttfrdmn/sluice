@@ -17,6 +17,7 @@ semantic versioning on the 0.x series.
 - `estimate` uses measured leaves per request, leaf prompt tokens, reference and judge shares, and tag spend once the tag pass has run; `-subsample test` budgets the test split.
 - Report: class × source × author_kind count table (n only).
 - ChatGPT export: `-chatgpt-export` and `probe chatgpt-export` accept a directory of per-conversation JSON files as well as `conversations.json`. Observed schema in `docs/SCHEMAS.md`.
+- Tagger: an empty model response is recorded as `empty output (stop_reason=…)` instead of a JSON parse error.
 
 ### Changed
 - Repo prompt files come only from repos whose nearest git remote is owned by `harvest.prompt_file_owners` (scttfrdmn, playgroundlogic, provabl, trnsci) or that have no remote; matches under `vendor/` and `.hermit/` are excluded. Exclusions are listed with their reason in `repo_prompt_files.txt`.
