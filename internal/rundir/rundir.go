@@ -71,5 +71,9 @@ func (d Dir) Subsample() string { return d.p("subsample.json") }
 // calibration one and not tagged until the test split is opened.
 func (d Dir) SubsampleTest() string { return d.p("subsample_test.json") }
 
+// Pilot is the matrix+label pilot: a seeded, stratified draw of leaf ids
+// that matrix, label and estimate restrict to with -pilot.
+func (d Dir) Pilot() string { return d.p("pilot.json") }
+
 // PromptFiles lists the repo prompt files the harvest kept (local only).
 func (d Dir) PromptFiles() string { return d.p("repo_prompt_files.txt") }

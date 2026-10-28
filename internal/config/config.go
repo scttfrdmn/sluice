@@ -167,6 +167,7 @@ type Seeds struct {
 	Bootstrap uint64 `yaml:"bootstrap"`
 	Minhash   uint64 `yaml:"minhash"`
 	E0Sample  uint64 `yaml:"e0_sample"`
+	Pilot     uint64 `yaml:"pilot"`
 }
 
 // Prompts names the prompt template files.

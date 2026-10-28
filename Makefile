@@ -12,7 +12,7 @@ E0_RUN    := e0-testdata
 E0_RAW    := testdata/raw
 E0_CAP    := -max-spend 1000
 
-.PHONY: all build test vet e0 pull-sessions probes open-test clean
+.PHONY: all build test vet e0 pull-sessions probes open-test pilot clean
 
 all: build
 
@@ -64,6 +64,16 @@ open-test: build
 	$(BIN)/matrix -config $(CONFIG) -runs $(RUNS) -run $(RUN) -split test -max-spend $(MATRIX_CAP)
 	$(BIN)/label  -config $(CONFIG) -runs $(RUNS) -run $(RUN) -split test -max-spend $(LABEL_CAP)
 	$(BIN)/report -config $(CONFIG) -runs $(RUNS) -run $(RUN) -split test
+
+# Matrix+label pilot on runs/<id>/pilot.json, all on demand, then the
+# pilot-measured projection. Caps are set on the spend-approval issue:
+#   make pilot RUN=r2 MATRIX_CAP=.. LABEL_CAP=..
+pilot: build
+	@test -n "$(RUN)" -a -n "$(MATRIX_CAP)" -a -n "$(LABEL_CAP)" || (echo "pilot: set RUN, MATRIX_CAP, LABEL_CAP" && exit 1)
+	test -f $(RUNS)/$(RUN)/pilot.json || $(BIN)/harvest pilot -config $(CONFIG) -runs $(RUNS) -run $(RUN)
+	$(BIN)/matrix -config $(CONFIG) -runs $(RUNS) -run $(RUN) -pilot -on-demand -max-spend $(MATRIX_CAP)
+	$(BIN)/label  -config $(CONFIG) -runs $(RUNS) -run $(RUN) -pilot -max-spend $(LABEL_CAP)
+	$(BIN)/estimate -config $(CONFIG) -runs $(RUNS) -run $(RUN)
 
 # Copy Claude Code session logs from every configured host.
 pull-sessions: build

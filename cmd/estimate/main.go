@@ -10,7 +10,9 @@
 // shares). After the tag pass, those are measured from leaves.jsonl: leaves
 // per request and leaf prompt tokens per stratum, and reference and judge
 // shares from each leaf's labeling plan; the tag column is the measured
-// spend. Output lengths stay assumed until the matrix runs.
+// spend. Once matrix and label have run on some leaves (the pilot), matrix
+// output tokens per stratum and model, label cost per cell, and reference
+// cost are measured too, and a pilot-measurements section is printed.
 //
 // Prices: batch where the price list has one (Nova matrix cells outside the
 // on-demand latency subsample); on-demand everywhere else, which is the
@@ -29,6 +31,7 @@ import (
 	"github.com/scttfrdmn/sluice/internal/corpus"
 	"github.com/scttfrdmn/sluice/internal/jsonl"
 	"github.com/scttfrdmn/sluice/internal/label"
+	"github.com/scttfrdmn/sluice/internal/matrix"
 	"github.com/scttfrdmn/sluice/internal/rundir"
 )
 
@@ -60,7 +63,27 @@ type stratum struct {
 	leafTokSum             float64
 	tests, numerics, judge int
 	tagUSD                 float64
+	// Measured after the matrix and label run on some of its leaves, per
+	// pool model: output tokens and label cost per cell; and per reference.
+	cells, labeled   map[string]int
+	outTok, labelUSD map[string]float64
+	refs             int
+	refUSD           float64
+	judged, agree    int
+	judgeFailed      int
 }
+
+// modelStat is what the pilot measured for one pool model.
+type modelStat struct {
+	n, empty int
+	out      float64
+	stop     map[string]int
+}
+
+// measuredScale is the high-scenario multiplier on pilot-measured output
+// tokens and label and reference costs: the full subsample can differ from
+// the pilot draw.
+const measuredScale = 1.5
 
 // Pre-tag assumptions, used only for strata with no tagged requests.
 var assumedLeaves = map[string]float64{corpus.SourceClaudeCode: 1.3, "repos:issue": 2.5, "repos:prompt-file": 5, corpus.SourceWildchat: 1.2, corpus.SourceChatGPT: 1.3, corpus.SourceClaudeExport: 1.3}
@@ -115,7 +138,7 @@ func run() error {
 		s := corpus.Stratum(r)
 		stratumOf[r.ID] = s
 		if strata[s] == nil {
-			strata[s] = &stratum{}
+			strata[s] = &stratum{cells: map[string]int{}, labeled: map[string]int{}, outTok: map[string]float64{}, labelUSD: map[string]float64{}}
 		}
 		st := strata[s]
 		st.n++
@@ -163,6 +186,75 @@ func run() error {
 	for _, st := range strata {
 		measured = measured || st.tagged > 0
 	}
+
+	// Pilot measurements, if the matrix and label have run on some leaves.
+	leafStratum := map[string]string{}
+	if err := jsonl.Each(dir.Leaves(cfg.Taxonomy.Version), func(l corpus.Leaf) error {
+		if s, ok := stratumOf[l.RequestID]; ok {
+			leafStratum[l.LeafID] = s
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	cells, err := matrix.ReadAll(dir.MatrixDir())
+	if err != nil {
+		return err
+	}
+	byModel := map[string]*modelStat{}
+	for _, c := range cells {
+		s, ok := leafStratum[c.LeafID]
+		if !ok {
+			continue
+		}
+		st := strata[s]
+		st.cells[c.Model]++
+		st.outTok[c.Model] += float64(c.TokensOut)
+		ms := byModel[c.Model]
+		if ms == nil {
+			ms = &modelStat{stop: map[string]int{}}
+			byModel[c.Model] = ms
+		}
+		ms.n++
+		ms.out += float64(c.TokensOut)
+		ms.stop[c.StopReason]++
+		if strings.TrimSpace(c.Output) == "" {
+			ms.empty++
+		}
+	}
+	methods := map[string]int{}
+	if err := jsonl.Each(dir.Labels(), func(l label.Label) error {
+		s, ok := leafStratum[l.LeafID]
+		if !ok {
+			return nil
+		}
+		st := strata[s]
+		st.labeled[l.Model]++
+		st.labelUSD[l.Model] += l.CostUSD
+		methods[l.Method]++
+		switch {
+		case l.Method == label.MethodJudgeFailed:
+			st.judgeFailed++
+		case l.JudgeAgreement != nil:
+			st.judged++
+			if *l.JudgeAgreement {
+				st.agree++
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := jsonl.Each(dir.Refs(), func(r label.Ref) error {
+		if s, ok := leafStratum[r.LeafID]; ok {
+			strata[s].refs++
+			strata[s].refUSD += r.CostUSD
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	piloted := len(byModel) > 0
 
 	tmpl := func(name string) (float64, error) {
 		b, err := os.ReadFile(cfg.Path(name))
@@ -242,27 +334,59 @@ func run() error {
 			}
 			leaves := n * L
 			nLeaves += leaves
+			scale := 1.0
+			if sc.name == "high" {
+				scale = measuredScale
+			}
 			for _, m := range cfg.Models {
 				calls := leaves * float64(cfg.Matrix.Draws)
 				od := calls * cfg.Matrix.OnDemandSubsample
-				res[m.Name].matrix += price(m, od*leafIn, od*sc.matrixOut, false) + price(m, (calls-od)*leafIn, (calls-od)*sc.matrixOut, true)
+				out := sc.matrixOut
+				if k := st.cells[m.Name]; k > 0 {
+					out = st.outTok[m.Name] / float64(k) * scale
+				}
+				res[m.Name].matrix += price(m, od*leafIn, od*out, false) + price(m, (calls-od)*leafIn, (calls-od)*out, true)
+				if k := st.labeled[m.Name]; k > 0 {
+					// Measured label cost per cell, attributed to the judges
+					// in proportion to their share of a two-judge call.
+					per := st.labelUSD[m.Name] / float64(k) * scale
+					js, _ := cfg.JudgesFor(m.Name)
+					var w []float64
+					var wsum float64
+					for _, j := range js {
+						x := price(j, pJudge+leafIn+out, sc.judgeOut, false)
+						w = append(w, x)
+						wsum += x
+					}
+					for i, j := range js {
+						res[j.Name].judge += calls * per * w[i] / max(wsum, 1e-12)
+					}
+					continue
+				}
 				js, err := cfg.JudgesFor(m.Name)
 				if err != nil {
 					return err
 				}
 				jc := calls * judgeShare * sc.retry
 				for _, j := range js {
-					res[j.Name].judge += price(j, jc*(pJudge+leafIn+sc.matrixOut), jc*sc.judgeOut, false)
+					res[j.Name].judge += price(j, jc*(pJudge+leafIn+out), jc*sc.judgeOut, false)
 				}
 			}
-			tc := leaves * testShare * sc.retry
-			nc := leaves * numShare * 2
-			res[strong.Name].ref += price(strong, tc*(pTest+leafIn), tc*sc.refOut, false) + price(strong, nc*(pNum+leafIn), nc*sc.refOut/2, false)
+			if st.refs > 0 {
+				res[strong.Name].ref += leaves * (testShare + numShare) * st.refUSD / float64(st.refs) * scale
+			} else {
+				tc := leaves * testShare * sc.retry
+				nc := leaves * numShare * 2
+				res[strong.Name].ref += price(strong, tc*(pTest+leafIn), tc*sc.refOut, false) + price(strong, nc*(pNum+leafIn), nc*sc.refOut/2, false)
+			}
 		}
 		results[sc.name] = res
 		leavesOut[sc.name] = nLeaves
 	}
 
+	if piloted {
+		fmt.Printf("Pilot-measured where the matrix and label have run: matrix output tokens per stratum and model, label cost per cell, cost per reference; high = measured ×%.1f. Unpiloted strata or models fall back to: ", measuredScale)
+	}
 	if measured {
 		fmt.Printf("Assumptions (output lengths only): expected %.0f output tok per matrix call, %.0f tok per judge verdict, %.0f tok per reference, retry ×%.2f. High: output ×2, judges at the %d-token cap, references ×2, retry ×%.1f.\n",
 			exp.matrixOut, exp.judgeOut, exp.refOut, exp.retry, cfg.Judges.MaxTokens, high.retry)
@@ -298,9 +422,59 @@ func run() error {
 	}
 	fmt.Printf("\nBy stage (for the per-stage `-max-spend` caps), expected / high: matrix %s / %s; label (references + judges) %s / %s.\n",
 		usd(te.matrix), usd(ht.matrix), usd(te.ref+te.judge), usd(ht.ref+ht.judge))
+	if piloted {
+		printPilot(cfg, names, strata, byModel, methods)
+	}
 	return nil
 }
 
+// printPilot prints what the pilot measured beyond cost: output lengths and
+// stop reasons by model, and judge agreement and label methods by stratum.
+func printPilot(cfg *config.Config, names []string, strata map[string]*stratum, byModel map[string]*modelStat, methods map[string]int) {
+	fmt.Print("\n## Pilot measurements\n\n")
+	fmt.Println("| model | cells | mean output tok | empty output | stop reasons |\n|---|---:|---:|---:|---|")
+	for _, m := range cfg.Models {
+		ms := byModel[m.Name]
+		if ms == nil {
+			continue
+		}
+		var stops []string
+		for _, r := range sortedKeys(ms.stop) {
+			stops = append(stops, fmt.Sprintf("%s %d", r, ms.stop[r]))
+		}
+		fmt.Printf("| %s | %d | %.0f | %.1f%% | %s |\n", m.Name, ms.n, ms.out/float64(ms.n), pct(ms.empty, ms.n), strings.Join(stops, ", "))
+	}
+	fmt.Println("\n| stratum | labeled cells | judged (two judges) | judges agree | judge failed |\n|---|---:|---:|---:|---:|")
+	for _, s := range names {
+		st := strata[s]
+		var n int
+		for _, k := range st.labeled {
+			n += k
+		}
+		if n == 0 {
+			continue
+		}
+		agree := "-"
+		if st.judged > 0 {
+			agree = fmt.Sprintf("%.1f%%", pct(st.agree, st.judged))
+		}
+		fmt.Printf("| %s | %d | %d | %s | %d |\n", s, n, st.judged, agree, st.judgeFailed)
+	}
+	var ms []string
+	for _, k := range sortedKeys(methods) {
+		ms = append(ms, fmt.Sprintf("%s %d", k, methods[k]))
+	}
+	fmt.Printf("\nLabel methods: %s.\n", strings.Join(ms, ", "))
+}
+
+func sortedKeys(m map[string]int) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	return ks
+}
 func price(m config.Model, in, out float64, batch bool) float64 {
 	pi, po := m.InPerM, m.OutPerM
 	if batch && m.BatchInPerM != nil && m.BatchOutPerM != nil {

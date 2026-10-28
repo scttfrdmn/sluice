@@ -93,6 +93,7 @@ seeds:
   bootstrap: 17
   minhash: 85
   e0_sample: 1000
+  pilot: 300
 
 prompts:
   tag: ../config/tag_prompt.txt

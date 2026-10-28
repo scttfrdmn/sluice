@@ -53,3 +53,29 @@ func TestDrawSubsample(t *testing.T) {
 		}
 	}
 }
+
+func TestDrawPilot(t *testing.T) {
+	var leaves []Leaf
+	add := func(src, kind string, n int) {
+		for i := range n {
+			leaves = append(leaves, Leaf{LeafID: fmt.Sprintf("%s-%s-%d", src, kind, i), Source: src, AuthorKind: kind, Split: "calibration"})
+		}
+	}
+	add(SourceClaudeCode, AuthorHuman, 20)
+	add(SourceRepos, AuthorAgent, 12)
+	add(SourceRepos, AuthorUnknown, 3)
+	leaves = append(leaves, Leaf{LeafID: "t-0", Source: SourceWildchat, Split: "test"})
+	s := DrawPilot(leaves, 5, "calibration", 300)
+	want := map[string]int{SourceClaudeCode: 5, "repos:agent": 5, "repos:unknown": 3}
+	if len(s.Selected) != len(want) {
+		t.Errorf("strata %v", s.Selected)
+	}
+	for k, n := range want {
+		if s.Selected[k] != n {
+			t.Errorf("%s: selected %d, want %d", k, s.Selected[k], n)
+		}
+	}
+	if again := DrawPilot(leaves, 5, "calibration", 300); !slices.Equal(again.IDs, s.IDs) {
+		t.Error("same seed drew a different pilot")
+	}
+}

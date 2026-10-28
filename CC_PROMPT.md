@@ -68,7 +68,7 @@ Plots (PNG via `gonum/plot`): accuracy–cost scatter per model with the best-pe
 - Prices and model IDs live in config with a date. The report prints them.
 - Do not add a third draw, a new class, or a new model without recording the change and the reason as a comment on the relevant GitHub issue.
 - Do not declare E0 complete, passed, or failed. When the pipeline runs end to end on the real corpus, print the decision line with its numbers and stop. If ρ < 0.50, run the one taxonomy iteration, print again, and stop. Scott decides.
-- `tag`, `matrix` and `label` require `-max-spend <usd>` (PROJECT.md §7, spend control). Caps are set per stage on #7. After the tag pass, re-run `estimate`, post the revised projection on #7, and stop until it is approved.
+- `tag`, `matrix` and `label` require `-max-spend <usd>` (PROJECT.md §7, spend control). Caps are set per stage on #7. After the tag pass, re-run `estimate`, post the revised projection on #7, and stop until it is approved. Then the pilot: `harvest pilot`, `matrix -pilot -on-demand`, `label -pilot`, `estimate`; post and stop again before the full matrix and label.
 - When something in the environment blocks a step (a Bedrock quota, a parse error in the session logs, a judge that will not return JSON), fix it and record what was done; do not substitute a weaker measurement silently.
 
 ## First session

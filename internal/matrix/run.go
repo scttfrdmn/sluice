@@ -37,6 +37,9 @@ type Options struct {
 	// MaxSpend is the stage cap in USD, cumulative with the cost of cells
 	// already in the matrix (package spend).
 	MaxSpend float64
+	// OnDemand runs every cell on demand, never in batch (the pilot, or no
+	// batch configuration).
+	OnDemand bool
 }
 
 // CellError records a cell that failed after all retries. It is retried on
@@ -103,7 +106,7 @@ func Run(ctx context.Context, cfg *config.Config, be Backend, leaves []corpus.Le
 
 	// Mode: batch above the threshold, except the latency subsample and any
 	// per-model remainder too small for a batch job.
-	useBatch := len(pending) > cfg.Matrix.BatchThreshold
+	useBatch := !o.OnDemand && len(pending) > cfg.Matrix.BatchThreshold
 	onDemand := []job{}
 	batchByModel := map[string][]job{}
 	for _, j := range pending {

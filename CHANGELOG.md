@@ -17,6 +17,7 @@ semantic versioning on the 0.x series.
 - `estimate` uses measured leaves per request, leaf prompt tokens, reference and judge shares, and tag spend once the tag pass has run; `-subsample test` budgets the test split.
 - Report: class × source × author_kind count table (n only).
 - ChatGPT export: `-chatgpt-export` and `probe chatgpt-export` accept a directory of per-conversation JSON files as well as `conversations.json`. Observed schema in `docs/SCHEMAS.md`.
+- Pilot: `harvest pilot` draws 50 tagged calibration leaves per stratum into `runs/<id>/pilot.json`; `matrix -pilot` and `label -pilot` restrict to it, and `matrix -on-demand` skips batch. `estimate` uses pilot-measured matrix output tokens, label cost per cell and reference cost, and prints output lengths, stop reasons and judge agreement.
 - Tagger: an empty model response is recorded as `empty output (stop_reason=…)` instead of a JSON parse error.
 
 ### Changed

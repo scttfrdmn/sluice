@@ -6,6 +6,7 @@
 //
 //	harvest pull-sessions [-config f] [-dest corpus/raw/claude-code]
 //	harvest subsample -run <id> [-per-stratum N] [-split calibration|all]
+//	harvest pilot -run <id> [-per-stratum N]
 //	harvest -run <id> [-claude-code dir] [-claude-export f] [-chatgpt-export f]
 //	        [-repos dir] [-wildchat N] ...
 //
@@ -14,6 +15,8 @@
 // subsample writes runs/<id>/subsample.json, the E0 subsample that tag,
 // matrix, label and report then restrict to, and subsample_test.json, the
 // matching test-split draw that is not tagged until the test split opens.
+// pilot writes runs/<id>/pilot.json, a seeded, stratified draw of tagged
+// calibration leaves that matrix, label and estimate restrict to with -pilot.
 package main
 
 import (
@@ -60,6 +63,9 @@ func run() error {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "subsample" {
 		return runSubsample(os.Args[2:])
+	}
+	if len(os.Args) > 1 && os.Args[1] == "pilot" {
+		return runPilot(os.Args[2:])
 	}
 
 	var (
@@ -223,6 +229,51 @@ func runSubsample(args []string) error {
 	if drew == 0 {
 		return errors.New("nothing drawn: every subsample file already exists")
 	}
+	return nil
+}
+
+// runPilot draws the matrix+label pilot from the tagged calibration leaves,
+// once per run.
+func runPilot(args []string) error {
+	fs := flag.NewFlagSet("pilot", flag.ExitOnError)
+	cfgPath := fs.String("config", "config/sluice.yaml", "config file")
+	runsRoot := fs.String("runs", "runs", "runs root")
+	runID := fs.String("run", "", "run id (required)")
+	per := fs.Int("per-stratum", 50, "leaves per stratum (source; repos split by author_kind)")
+	fs.Parse(args)
+	if *runID == "" {
+		return errors.New("-run is required")
+	}
+	if *per <= 0 {
+		return errors.New("per-stratum must be positive")
+	}
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	dir, err := rundir.Open(*runsRoot, *runID)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(dir.Pilot()); err == nil {
+		return fmt.Errorf("%s exists; drawn once per run", dir.Pilot())
+	}
+	leaves, err := jsonl.Read[corpus.Leaf](dir.Leaves(cfg.Taxonomy.Version))
+	if err != nil {
+		return err
+	}
+	s := corpus.DrawPilot(leaves, *per, "calibration", cfg.Seeds.Pilot)
+	if len(s.IDs) == 0 {
+		return errors.New("no calibration leaves: run tag first")
+	}
+	if err := corpus.WriteSubsample(dir.Pilot(), s); err != nil {
+		return err
+	}
+	fmt.Printf("pilot (split %s, seed %d, %d leaves per stratum):\n", s.Split, s.Seed, s.PerStratum)
+	for _, k := range slices.Sorted(maps.Keys(s.Available)) {
+		fmt.Printf("  %-20s %6d of %6d\n", k, s.Selected[k], s.Available[k])
+	}
+	fmt.Printf("wrote %d leaf ids to %s\n", len(s.IDs), dir.Pilot())
 	return nil
 }
 

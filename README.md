@@ -41,6 +41,9 @@ bin/harvest -run r2 -claude-code corpus/raw/claude-code \
 bin/harvest subsample -run r2 -corpus-md docs/CORPUS.md
 bin/estimate -run r2                       # projected spend, before any call
 bin/tag -run r2 -max-spend <usd>           # then re-run estimate on measured leaves
+bin/harvest pilot -run r2                  # 50 leaves per stratum
+bin/matrix -run r2 -pilot -on-demand -max-spend <usd>
+bin/label -run r2 -pilot -max-spend <usd>  # then re-run estimate on pilot measurements
 bin/matrix -run r2 -max-spend <usd>
 bin/label -run r2 -max-spend <usd>
 bin/report -run r2

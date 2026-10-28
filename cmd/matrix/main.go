@@ -36,6 +36,8 @@ func run() error {
 		runID    = flag.String("run", "", "run id (required)")
 		split    = flag.String("split", "", "only leaves from this split (default: all)")
 		limit    = flag.Int("limit", 0, "only the first N leaves (0 = all), for smoke tests")
+		pilot    = flag.Bool("pilot", false, "only the leaves in runs/<id>/pilot.json (harvest pilot)")
+		onDemand = flag.Bool("on-demand", false, "run every cell on demand, never in batch")
 		maxSpend = spend.Flag(nil)
 	)
 	flag.Parse()
@@ -69,6 +71,16 @@ func run() error {
 		}
 		leaves = f
 	}
+	if *pilot {
+		ids, _, err := corpus.ReadSubsample(dir.Pilot())
+		if err != nil {
+			return err
+		}
+		if ids == nil {
+			return fmt.Errorf("-pilot: %s missing; run harvest pilot first", dir.Pilot())
+		}
+		leaves = corpus.FilterLeaves(leaves, ids)
+	}
 	if *limit > 0 && *limit < len(leaves) {
 		leaves = leaves[:*limit]
 	}
@@ -77,5 +89,5 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	return matrix.Run(ctx, cfg, be, leaves, matrix.Options{Dir: dir.MatrixDir(), ErrorsLog: dir.MatrixErrors(), Log: os.Stdout, MaxSpend: *maxSpend})
+	return matrix.Run(ctx, cfg, be, leaves, matrix.Options{Dir: dir.MatrixDir(), ErrorsLog: dir.MatrixErrors(), Log: os.Stdout, MaxSpend: *maxSpend, OnDemand: *onDemand})
 }

@@ -53,6 +53,7 @@ func run() error {
 		runsRoot = flag.String("runs", "runs", "runs root")
 		runID    = flag.String("run", "", "run id (required)")
 		split    = flag.String("split", "", "only leaves from this split (default: all)")
+		pilot    = flag.Bool("pilot", false, "only the leaves in runs/<id>/pilot.json (harvest pilot)")
 		maxSpend = spend.Flag(nil)
 	)
 	flag.Parse()
@@ -95,6 +96,16 @@ func run() error {
 			}
 		}
 		leaves = f
+	}
+	if *pilot {
+		ids, _, err := corpus.ReadSubsample(dir.Pilot())
+		if err != nil {
+			return err
+		}
+		if ids == nil {
+			return fmt.Errorf("-pilot: %s missing; run harvest pilot first", dir.Pilot())
+		}
+		leaves = corpus.FilterLeaves(leaves, ids)
 	}
 	leafByID := make(map[string]corpus.Leaf, len(leaves))
 	for _, l := range leaves {
